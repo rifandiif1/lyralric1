@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Latar Belakang Squircle Gelap Elegan -->
+    <path
+        android:fillColor="#0D110A"
+        android:pathData="M24,0L84,0A24,24 0,0 1,108 24L108,84A24,24 0,0 1,84 108L24,108A24,24 0,0 1,0 84L0,24A24,24 0,0 1,24 0z" />
+
+    <!-- Lingkaran Piringan Hitam / Halo Glow -->
+    <path
+        android:fillColor="#1A2612"
+        android:pathData="M54,54m-38,0a38,38 0,1 1,76 0a38,38 0,1 1,-76 0" />
+
+    <path
+        android:strokeColor="#3A5A20"
+        android:strokeWidth="1.8"
+        android:pathData="M54,54m-32,0a32,32 0,1 1,64 0a32,32 0,1 1,-64 0" />
+
+    <!-- Bingkai Instrumen Lyra (Harpa Modern) -->
+    <path
+        android:strokeColor="#B8F36B"
+        android:strokeWidth="5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M33,28 C25,44 30,68 44,77 L64,77 C78,68 83,44 75,28" />
+
+    <!-- Dasar Pijakan Lyra -->
+    <path
+        android:strokeColor="#8FE03C"
+        android:strokeWidth="4.5"
+        android:strokeLineCap="round"
+        android:pathData="M38,83 L70,83" />
+
+    <!-- Bar Spektrum Audio / Senar Lyra (FFT Equalizer) -->
+    <path
+        android:strokeColor="#76D229"
+        android:strokeWidth="4"
+        android:strokeLineCap="round"
+        android:pathData="M43,42 L43,66" />
+
+    <path
+        android:strokeColor="#D9FF9A"
+        android:strokeWidth="4.5"
+        android:strokeLineCap="round"
+        android:pathData="M54,24 L54,70" />
+
+    <path
+        android:strokeColor="#76D229"
+        android:strokeWidth="4"
+        android:strokeLineCap="round"
+        android:pathData="M65,36 L65,66" />
+
+    <!-- Aksen Bintang Karaoke di Puncak -->
+    <path
+        android:fillColor="#D9FF9A"
+        android:pathData="M54,14 L56,19 L61,21 L56,23 L54,28 L52,23 L47,21 L52,19 Z" />
+</vector>
