@@ -210,25 +210,29 @@ object YtmClient {
                     .put("videoId", videoId)
                     .put("contentCheckOk", true)
                     .put("racyCheckOk", true)
-                    .put("context", JSONObject().put("client", clientObj))
+                    .put("context", JSONObject().put("context", JSONObject().put("client", clientObj))) // Perbaikan struktur context YTM
 
                 val json = postJson(
                     "https://www.youtube.com/youtubei/v1/player?prettyPrint=false",
                     body,
                     mapOf("User-Agent" to ua)
                 )
-                val adaptive = json.optJSONObject("streamingData")?.optJSONArray("adaptiveFormats") ?: return@runCatching
+                
+                val adaptive = json.optJSONObject("streamingData")?.optJSONArray("adaptiveFormats") ?: json.optJSONObject("streamingData")?.optJSONArray("formats") ?: return@runCatching
                 var bestUrl: String? = null
-                var bestBitrate = 0
+                var highestBitrate = 0
+
                 for (i in 0 until adaptive.length()) {
                     val fmt = adaptive.optJSONObject(i) ?: continue
                     val mime = fmt.optString("mimeType")
                     val url = fmt.optString("url")
+                    
+                    // Cari format audio yang valid (prioritaskan mp4a / m4a)
                     if (mime.startsWith("audio/") && url.isNotBlank()) {
-                        val br = fmt.optInt("bitrate", 0)
-                        val score = if (mime.contains("mp4a")) br + 50_000 else br
-                        if (score > bestBitrate) {
-                            bestBitrate = score
+                        val bitrate = fmt.optInt("bitrate", 0)
+                        val score = if (mime.contains("mp4a")) bitrate + 100_000 else bitrate
+                        if (score > highestBitrate) {
+                            highestBitrate = score
                             bestUrl = url
                         }
                     }
