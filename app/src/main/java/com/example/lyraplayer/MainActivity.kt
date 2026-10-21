@@ -1555,8 +1555,7 @@ songs = found.values.distinctBy { if (it.filePath.isNotBlank()) it.filePath else
 
  fun playTracks(list: List<AudioTrack>, index: Int) {
         val c = controller ?: run { 
-            android.util.Log.e("LyraStream", "Error: MediaController (c) masih null!")
-            status = "Pemutar sedang disiapkan."
+            status = "Error: Pemutar media belum siap."
             return 
         }
         if (list.isEmpty() || index !in list.indices) return
@@ -1566,59 +1565,60 @@ songs = found.values.distinctBy { if (it.filePath.isNotBlank()) it.filePath else
         val uriStr = s.uri.toString()
 
         val isYtm = uriStr.startsWith("ytm://") || s.id.startsWith("ytm:")
-        android.util.Log.d("LyraStream", "Mencoba memutar: ${s.title} | URI: $uriStr | isYtm: $isYtm")
 
         if (isYtm) {
-            status = "Menghubungkan ke YouTube Music..."
+            status = "Memuat audio dari YouTube Music..."
             val videoId = when {
                 uriStr.startsWith("ytm://") -> s.uri.host?.takeIf { it.isNotBlank() } ?: s.uri.lastPathSegment.orEmpty()
                 else -> s.id.removePrefix("ytm:")
             }
-            android.util.Log.d("LyraStream", "Extracted VideoId: $videoId")
 
             scope.launch(Dispatchers.IO) {
-                try {
-                    val realStreamUrl = YtmClient.resolveStreamUrl(videoId)
-                    android.util.Log.d("LyraStream", "Hasil resolveStreamUrl: $realStreamUrl")
-                    
-                    withContext(Dispatchers.Main) {
-                        if (realStreamUrl.isNullOrBlank()) {
-                            android.util.Log.e("LyraStream", "Gagal: realStreamUrl kosong atau null!")
-                            status = "Gagal memutar: URL stream kosong."
-                            return@withContext
-                        }
-
-                        try {
-                            val onlineUri = Uri.parse(realStreamUrl)
-                            val mediaItem = MediaItem.Builder()
-                                .setUri(onlineUri)
-                                .setMediaId(s.id)
-                                .setMediaMetadata(
-                                    MediaMetadata.Builder()
-                                        .setTitle(s.title)
-                                        .setArtist(s.artist)
-                                        .setAlbumTitle(s.album)
-                                        .setArtworkUri(s.artworkUri)
-                                        .build()
-                                )
-                                .build()
-
-                            c.stop()
-                            c.clearMediaItems()
-                            c.setMediaItem(mediaItem)
-                            c.prepare()
-                            c.play()
-                            android.util.Log.d("LyraStream", "Berhasil mengirim MediaItem ke ExoPlayer dan memanggil play()")
-                            status = "Memutar: ${s.title}"
-                        } catch (e: Exception) {
-                            android.util.Log.e("LyraStream", "Exception saat setMediaItem/play: ${e.message}", e)
-                            status = "Error pemutaran: ${e.message}"
-                        }
+                // Panggil pemecah URL stream
+                val realStreamUrl = runCatching { YtmClient.resolveStreamUrl(videoId) }.getOrNull()
+                
+                withContext(Dispatchers.Main) {
+                    if (realStreamUrl.isNullOrBlank()) {
+                        // INI AKAN MUNCUL DI LAYAR JIKA URL GAGAL DIDAPATKAN
+                        status = "Gagal: Server YouTube menolak tautan audio."
+                        return@withContext
                     }
-                } catch (e: Exception) {
-                    android.util.Log.e("LyraStream", "Exception di IO scope saat resolveStreamUrl: ${e.message}", e)
-                    withContext(Dispatchers.Main) {
-                        status = "Error jaringan: ${e.message}"
+
+                    try {
+                        status = "Menyiapkan pemutar..."
+                        val onlineUri = Uri.parse(realStreamUrl)
+                        
+                        // Buat DataSource.Factory dengan User-Agent agar lolos proteksi YouTube
+                        val httpDataSourceFactory = androidx.media3.datasource.DefaultHttpDataSource.Factory()
+                            .setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+                            .setAllowCrossProtocolRedirects(true)
+
+                        val mediaSourceFactory = androidx.media3.exoplayer.source.DefaultMediaSourceFactory(
+                            androidx.media3.datasource.DefaultDataSource.Factory(context, httpDataSourceFactory)
+                        )
+
+                        // Masukkan ke MediaItem
+                        val mediaItem = MediaItem.Builder()
+                            .setUri(onlineUri)
+                            .setMediaId(s.id)
+                            .setMediaMetadata(
+                                MediaMetadata.Builder()
+                                    .setTitle(s.title)
+                                    .setArtist(s.artist)
+                                    .setAlbumTitle(s.album)
+                                    .setArtworkUri(s.artworkUri)
+                                    .build()
+                            )
+                            .build()
+
+                        c.stop()
+                        c.clearMediaItems()
+                        c.setMediaItem(mediaItem)
+                        c.prepare()
+                        c.play()
+                        status = "Memutar online: ${s.title}"
+                    } catch (e: Exception) {
+                        status = "Error ExoPlayer: ${e.message}"
                     }
                 }
             }
@@ -1644,10 +1644,9 @@ songs = found.values.distinctBy { if (it.filePath.isNotBlank()) it.filePath else
             c.setMediaItems(items, index, 0L)
             c.prepare()
             c.play()
-            status = "Memutar: ${s.title}"
+            status = "Memutar lokal: ${s.title}"
         }
 
-        // Simpan status pemutaran terakhir
         currentTitle = s.title
         currentArtist = s.artist
         currentAlbum = s.album
