@@ -79,6 +79,8 @@ import com.example.lyraplayer.lyrics.AudioTagEditor
 import com.example.lyraplayer.lyrics.LrcParser
 import com.example.lyraplayer.lyrics.LrcResult
 import com.example.lyraplayer.lyrics.LrclibClient
+import com.example.lyraplayer.lyrics.YtmClient
+import com.example.lyraplayer.lyrics.YtmTrackItem
 import com.example.lyraplayer.playback.PlaybackService
 import com.example.lyraplayer.widget.LyricsWidgetProvider
 import com.google.common.util.concurrent.ListenableFuture
@@ -102,6 +104,7 @@ import kotlin.math.ln
 import kotlin.math.pow
 import kotlin.math.sin
 import kotlin.math.sqrt
+
 
 // === 1. MODELS, ENUMS & HELPERS ===
 private data class AudioTrack(
@@ -132,7 +135,7 @@ private data class KaraokeLine(
 )
 
 private enum class LyraTab(val label: String) { HOME("Home"), NOW_PLAYING("Putar"), LIBRARY("Musik"), LYRICS("Lirik"), SETTINGS("Setelan") }
-private enum class LibrarySubTab(val title: String) { ALL("Semua"), FOLDERS("Folder"), FAVORITES("Favorit"), PLAYLISTS("Playlist"), QUEUE("Antrean") }
+private enum class LibrarySubTab(val title: String) { ALL("Semua"), YT_MUSIC("YT Music"), FOLDERS("Folder"), FAVORITES("Favorit"), PLAYLISTS("Playlist"), QUEUE("Antrean") }
 
 private enum class SortOption(val label: String) {
     DATE_ADDED_DESC("Terbaru Ditambahkan"),
@@ -1209,7 +1212,60 @@ private fun LyraApp() {
     var editAlbum by remember { mutableStateOf("") }
     var editArtworkUri by remember { mutableStateOf("") }
     var showFullKaraokeInPlayer by remember { mutableStateOf(false) }
+    var ytmQuery by remember { mutableStateOf("") }
+    var ytmResults by remember { mutableStateOf<List<YtmTrackItem>>(emptyList()) }
+    var isSearchingYtm by remember { mutableStateOf(false) }
+    var ytmStatus by remember { mutableStateOf("Cari & streaming lagu langsung dari YouTube Music") }
 
+    fun ytmItemToAudioTrack(item: YtmTrackItem): AudioTrack {
+        return AudioTrack(
+            id = "ytm:${item.videoId}",
+            uri = Uri.parse("ytm://${item.videoId}"),
+            title = item.title,
+            artist = item.artist,
+            album = item.album,
+            duration = item.durationMs,
+            folder = "YouTube Music Stream",
+            artworkUri = item.thumbnailUrl.takeIf { it.isNotBlank() }?.let { Uri.parse(it) }
+        )
+    }
+
+    fun triggerYtmSearch(query: String) {
+        val q = query.trim()
+        if (q.isBlank()) return
+        scope.launch {
+            isSearchingYtm = true
+            ytmStatus = "Mencari \"$q\" di YouTube Music..."
+            try {
+                val found = withContext(Dispatchers.IO) { YtmClient.searchSongs(q) }
+                ytmResults = found
+                ytmStatus = if (found.isEmpty()) "Tidak ada hasil untuk \"$q\"." else "Ditemukan ${found.size} lagu siap streaming."
+            } catch (e: Exception) {
+                ytmStatus = "Gagal terhubung ke YouTube Music: ${e.message}"
+            } finally {
+                isSearchingYtm = false
+            }
+        }
+    }
+
+    fun loadYtmRadio(seedVideoId: String, seedTitle: String) {
+        scope.launch {
+            isSearchingYtm = true
+            ytmStatus = "Memuat radio otomatis untuk \"$seedTitle\"..."
+            try {
+                val radio = withContext(Dispatchers.IO) { YtmClient.fetchRadioTracks(seedVideoId) }
+                if (radio.isNotEmpty()) {
+                    ytmResults = radio
+                    ytmStatus = "Radio \"$seedTitle\" (${radio.size} lagu)"
+                }
+            } catch (_: Exception) {
+            } finally {
+                isSearchingYtm = false
+            }
+        }
+    }
+
+    
     val parsedKaraokeLines = remember(lrcText, autoWordKaraoke) { EnhancedLrcEngine.parse(lrcText, autoWordKaraoke) }
     val hasEnhancedKaraoke = remember(parsedKaraokeLines) { parsedKaraokeLines.any { it.isEnhanced } }
 
