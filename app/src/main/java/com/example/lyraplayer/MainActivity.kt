@@ -1553,7 +1553,7 @@ songs = found.values.distinctBy { if (it.filePath.isNotBlank()) it.filePath else
         prefs.edit().putStringSet("favorites", favoriteIds).apply()
     }
 
-    fun playTracks(list: List<AudioTrack>, index: Int) {
+   fun playTracks(list: List<AudioTrack>, index: Int) {
         val c = controller ?: run { status = "Pemutar sedang disiapkan."; return }
         if (list.isEmpty() || index !in list.indices) return
         
@@ -1561,49 +1561,54 @@ songs = found.values.distinctBy { if (it.filePath.isNotBlank()) it.filePath else
         val s = applyTrackOverride(rawSong)
         val uriStr = s.uri.toString()
 
-        // Jika ini lagu YouTube Music (ytm://)
-        if (uriStr.startsWith("ytm://") || s.id.startsWith("ytm:")) {
+        // Periksa apakah ini lagu YouTube Music (berawalan ytm:// atau id ytm:)
+        val isYtm = uriStr.startsWith("ytm://") || s.id.startsWith("ytm:")
+
+        if (isYtm) {
             status = "Menghubungkan ke YouTube Music..."
-            
-            // Ambil videoId yang bersih dari URI atau ID
             val videoId = when {
                 uriStr.startsWith("ytm://") -> s.uri.host?.takeIf { it.isNotBlank() } ?: s.uri.lastPathSegment.orEmpty()
                 else -> s.id.removePrefix("ytm:")
             }
 
+            // Jalankan pengambilan link stream di Dispatchers.IO (Background Thread)
             scope.launch(Dispatchers.IO) {
-                // Panggil API untuk mendapatkan URL stream audio asli
-                val realStreamUrl = YtmClient.resolveStreamUrl(videoId)
+                val realStreamUrl = runCatching { YtmClient.resolveStreamUrl(videoId) }.getOrNull()
                 
                 withContext(Dispatchers.Main) {
                     if (realStreamUrl.isNullOrBlank()) {
-                        status = "Gagal memuat streaming (Cek koneksi internet)."
+                        status = "Gagal memutar: Periksa koneksi internet."
                         return@withContext
                     }
-                    
-                    val onlineUri = Uri.parse(realStreamUrl)
-                    val mediaItem = MediaItem.Builder()
-                        .setUri(onlineUri)
-                        .setMediaId(s.id)
-                        .setMediaMetadata(
-                            MediaMetadata.Builder()
-                                .setTitle(s.title)
-                                .setArtist(s.artist)
-                                .setAlbumTitle(s.album)
-                                .setArtworkUri(s.artworkUri)
-                                .build()
-                        )
-                        .build()
 
-                    c.setMediaItem(mediaItem)
-                    c.prepare()
-                    runCatching { c.volume = 1.0f }
-                    c.play()
-                    status = "Memutar: ${s.title}"
+                    try {
+                        val onlineUri = Uri.parse(realStreamUrl)
+                        val mediaItem = MediaItem.Builder()
+                            .setUri(onlineUri)
+                            .setMediaId(s.id)
+                            .setMediaMetadata(
+                                MediaMetadata.Builder()
+                                    .setTitle(s.title)
+                                    .setArtist(s.artist)
+                                    .setAlbumTitle(s.album)
+                                    .setArtworkUri(s.artworkUri)
+                                    .build()
+                            )
+                            .build()
+
+                        // Set dan langsung mainkan di MediaController
+                        c.setMediaItem(mediaItem)
+                        c.prepare()
+                        c.play()
+                        playing = true
+                        status = "Memutar: ${s.title}"
+                    } catch (e: Exception) {
+                        status = "Error pemutaran: ${e.message}"
+                    }
                 }
             }
         } else {
-            // Pemutaran file lokal seperti biasa...
+            // Pemutaran normal untuk file audio lokal di perangkat
             val items = list.map { songItem ->
                 val track = applyTrackOverride(songItem)
                 MediaItem.Builder()
@@ -1621,12 +1626,12 @@ songs = found.values.distinctBy { if (it.filePath.isNotBlank()) it.filePath else
             }
             c.setMediaItems(items, index, 0L)
             c.prepare()
-            runCatching { c.volume = 1.0f }
             c.play()
+            playing = true
             status = "Memutar: ${s.title}"
         }
 
-        // Simpan riwayat lagu terakhir yang diputar
+        // Simpan status riwayat lagu terakhir
         currentTitle = s.title
         currentArtist = s.artist
         currentAlbum = s.album
@@ -1651,7 +1656,7 @@ songs = found.values.distinctBy { if (it.filePath.isNotBlank()) it.filePath else
             .putString("play_counts_json", serializeCounts(updatedCounts).toString())
             .apply()
     }
-
+   
     DisposableEffect(context) {
         val token = SessionToken(context, ComponentName(context, PlaybackService::class.java))
         val future: ListenableFuture<MediaController> = MediaController.Builder(context, token).buildAsync()
