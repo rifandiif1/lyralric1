@@ -1567,28 +1567,48 @@ songs = found.values.distinctBy { if (it.filePath.isNotBlank()) it.filePath else
         val isYtm = uriStr.startsWith("ytm://") || s.id.startsWith("ytm:")
 
         if (isYtm) {
-            status = "Menghubungkan ke YouTube Music..."
+            status = "Mengunduh lagu online ke perangkat..."
             val videoId = when {
                 uriStr.startsWith("ytm://") -> s.uri.host?.takeIf { it.isNotBlank() } ?: s.uri.lastPathSegment.orEmpty()
                 else -> s.id.removePrefix("ytm:")
             }
 
             scope.launch(Dispatchers.IO) {
-                // Panggil pemecah URL stream dari YtmClient
-                val realStreamUrl = runCatching { YtmClient.resolveStreamUrl(videoId) }.getOrNull()
+                // 1. Download file MP3 secara utuh ke folder Music/LyraDownloads
+                val trackItem = YtmTrackItem(
+                    videoId = videoId,
+                    title = s.title,
+                    artist = s.artist,
+                    album = s.album,
+                    durationMs = s.duration,
+                    thumbnailUrl = s.artworkUri?.toString().orEmpty()
+                )
+                
+                val success = YtmClient.downloadSongToDevice(context, trackItem)
                 
                 withContext(Dispatchers.Main) {
-                    if (realStreamUrl.isNullOrBlank()) {
-                        status = "Gagal memutar: Server YouTube menolak tautan audio."
+                    if (!success) {
+                        status = "Gagal mengunduh lagu online."
                         return@withContext
                     }
 
+                    // 2. Cari file MP3 yang baru saja diunduh di folder Music/LyraDownloads
+                    val cleanTitle = s.title.replace(Regex("[^a-zA-Z0-9_-]"), "_").take(40)
+                    val musicDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), "LyraDownloads")
+                    val downloadedFile = File(musicDir, "YT_Music_${cleanTitle}_$videoId.mp3") // Sesuaikan ekstensi .mp3 atau .m4a
+
+                    val fileToPlay = if (downloadedFile.exists()) {
+                        Uri.fromFile(downloadedFile)
+                    } else {
+                        // Cari file dengan awalan yang sama jika ekstensi berbeda
+                        val found = musicDir.listFiles()?.firstOrNull { it.name.contains(videoId) }
+                        if (found != null) Uri.fromFile(found) else s.uri
+                    }
+
                     try {
-                        status = "Menyiapkan pemutar online..."
-                        val onlineUri = Uri.parse(realStreamUrl)
-                        
+                        status = "Memutar lagu unduhan..."
                         val mediaItem = MediaItem.Builder()
-                            .setUri(onlineUri)
+                            .setUri(fileToPlay)
                             .setMediaId(s.id)
                             .setMediaMetadata(
                                 MediaMetadata.Builder()
@@ -1605,14 +1625,14 @@ songs = found.values.distinctBy { if (it.filePath.isNotBlank()) it.filePath else
                         c.setMediaItem(mediaItem)
                         c.prepare()
                         c.play()
-                        status = "Memutar online: ${s.title}"
+                        status = "Memutar (Offline): ${s.title}"
                     } catch (e: Exception) {
                         status = "Error pemutaran: ${e.message}"
                     }
                 }
             }
         } else {
-            // Pemutaran file lagu lokal perangkat
+            // Pemutaran file lagu lokal perangkat biasa
             c.stop()
             c.clearMediaItems()
             val items = list.map { songItem ->
