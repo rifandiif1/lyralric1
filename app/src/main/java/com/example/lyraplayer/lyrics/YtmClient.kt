@@ -243,4 +243,52 @@ object YtmClient {
             bestUrl.replace(Regex("=w\\d+-h\\d+.*$"), "=w544-h544-l90-rj")
         } else bestUrl
     }
+    // Tambahkan data class ini di YtmClient.kt (di luar object YtmClient)
+data class YtmHomeSection(
+    val title: String,
+    val items: List<YtmTrackItem>
+)
+
+// Tambahkan fungsi ini di dalam object YtmClient
+    fun fetchHomeSections(): List<YtmHomeSection> {
+        val body = JSONObject().put("browseId", "FEmusic_home")
+        val root = postWebRemix("browse", body)
+        val sections = mutableListOf<YtmHomeSection>()
+
+        val sectionList = findFirst(root, "sectionListRenderer")
+        val contents = sectionList?.optJSONArray("contents") ?: return emptyList()
+
+        for (i in 0 until contents.length()) {
+            val sec = contents.optJSONObject(i) ?: continue
+            val carousel = sec.optJSONObject("musicCarouselShelfRenderer")
+            if (carousel != null) {
+                val headerTitle = extractText(findFirst(carousel.optJSONObject("header"), "title"))
+                val carContents = carousel.optJSONArray("contents") ?: continue
+                val tracks = mutableListOf<YtmTrackItem>()
+                for (j in 0 until carContents.length()) {
+                    val c = carContents.optJSONObject(j) ?: continue
+                    
+                    // Ekstraksi item musik (bisa berupa responsive list atau two row card)
+                    val rItem = c.optJSONObject("musicResponsiveListItemRenderer")
+                    val twoRow = c.optJSONObject("musicTwoRowItemRenderer")
+
+                    if (rItem != null) {
+                        parseListItem(rItem)?.let { tracks.add(it) }
+                    } else if (twoRow != null) {
+                        val title = extractText(twoRow.optJSONObject("title"))
+                        val subtitle = extractText(twoRow.optJSONObject("subtitle"))
+                        val thumb = extractBestThumbnail(twoRow.optJSONObject("thumbnailRenderer"))
+                        val vid = findFirst(twoRow.optJSONObject("navigationEndpoint"), "watchEndpoint")?.optString("videoId").orEmpty()
+                        if (title.isNotBlank()) {
+                            tracks.add(YtmTrackItem(vid.ifBlank { "browse_${title.hashCode()}" }, title, subtitle, "YouTube Music", 0L, "", thumb))
+                        }
+                    }
+                }
+                if (tracks.isNotEmpty() && headerTitle.isNotBlank()) {
+                    sections.add(YtmHomeSection(headerTitle, tracks))
+                }
+            }
+        }
+        return sections
+    }
 }
