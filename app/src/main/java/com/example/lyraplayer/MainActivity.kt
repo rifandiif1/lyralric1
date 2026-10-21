@@ -1554,7 +1554,11 @@ songs = found.values.distinctBy { if (it.filePath.isNotBlank()) it.filePath else
     }
 
  fun playTracks(list: List<AudioTrack>, index: Int) {
-        val c = controller ?: run { status = "Pemutar sedang disiapkan."; return }
+        val c = controller ?: run { 
+            android.util.Log.e("LyraStream", "Error: MediaController (c) masih null!")
+            status = "Pemutar sedang disiapkan."
+            return 
+        }
         if (list.isEmpty() || index !in list.indices) return
         
         val rawSong = list[index]
@@ -1562,6 +1566,7 @@ songs = found.values.distinctBy { if (it.filePath.isNotBlank()) it.filePath else
         val uriStr = s.uri.toString()
 
         val isYtm = uriStr.startsWith("ytm://") || s.id.startsWith("ytm:")
+        android.util.Log.d("LyraStream", "Mencoba memutar: ${s.title} | URI: $uriStr | isYtm: $isYtm")
 
         if (isYtm) {
             status = "Menghubungkan ke YouTube Music..."
@@ -1569,43 +1574,58 @@ songs = found.values.distinctBy { if (it.filePath.isNotBlank()) it.filePath else
                 uriStr.startsWith("ytm://") -> s.uri.host?.takeIf { it.isNotBlank() } ?: s.uri.lastPathSegment.orEmpty()
                 else -> s.id.removePrefix("ytm:")
             }
+            android.util.Log.d("LyraStream", "Extracted VideoId: $videoId")
 
             scope.launch(Dispatchers.IO) {
-                // Ambil URL stream asli dari YtmClient
-                val realStreamUrl = runCatching { YtmClient.resolveStreamUrl(videoId) }.getOrNull()
-                
-                withContext(Dispatchers.Main) {
-                    if (realStreamUrl.isNullOrBlank()) {
-                        status = "Gagal memutar: Periksa koneksi internet."
-                        return@withContext
+                try {
+                    val realStreamUrl = YtmClient.resolveStreamUrl(videoId)
+                    android.util.Log.d("LyraStream", "Hasil resolveStreamUrl: $realStreamUrl")
+                    
+                    withContext(Dispatchers.Main) {
+                        if (realStreamUrl.isNullOrBlank()) {
+                            android.util.Log.e("LyraStream", "Gagal: realStreamUrl kosong atau null!")
+                            status = "Gagal memutar: URL stream kosong."
+                            return@withContext
+                        }
+
+                        try {
+                            val onlineUri = Uri.parse(realStreamUrl)
+                            val mediaItem = MediaItem.Builder()
+                                .setUri(onlineUri)
+                                .setMediaId(s.id)
+                                .setMediaMetadata(
+                                    MediaMetadata.Builder()
+                                        .setTitle(s.title)
+                                        .setArtist(s.artist)
+                                        .setAlbumTitle(s.album)
+                                        .setArtworkUri(s.artworkUri)
+                                        .build()
+                                )
+                                .build()
+
+                            c.stop()
+                            c.clearMediaItems()
+                            c.setMediaItem(mediaItem)
+                            c.prepare()
+                            c.play()
+                            android.util.Log.d("LyraStream", "Berhasil mengirim MediaItem ke ExoPlayer dan memanggil play()")
+                            status = "Memutar: ${s.title}"
+                        } catch (e: Exception) {
+                            android.util.Log.e("LyraStream", "Exception saat setMediaItem/play: ${e.message}", e)
+                            status = "Error pemutaran: ${e.message}"
+                        }
                     }
-
-                    try {
-                        val onlineUri = Uri.parse(realStreamUrl)
-                        val mediaItem = MediaItem.Builder()
-                            .setUri(onlineUri)
-                            .setMediaId(s.id)
-                            .setMediaMetadata(
-                                MediaMetadata.Builder()
-                                    .setTitle(s.title)
-                                    .setArtist(s.artist)
-                                    .setAlbumTitle(s.album)
-                                    .setArtworkUri(s.artworkUri)
-                                    .build()
-                            )
-                            .build()
-
-                        c.setMediaItem(mediaItem)
-                        c.prepare()
-                        c.play()
-                        status = "Memutar: ${s.title}"
-                    } catch (e: Exception) {
-                        status = "Error pemutaran: ${e.message}"
+                } catch (e: Exception) {
+                    android.util.Log.e("LyraStream", "Exception di IO scope saat resolveStreamUrl: ${e.message}", e)
+                    withContext(Dispatchers.Main) {
+                        status = "Error jaringan: ${e.message}"
                     }
                 }
             }
         } else {
             // Pemutaran file lagu lokal perangkat
+            c.stop()
+            c.clearMediaItems()
             val items = list.map { songItem ->
                 val track = applyTrackOverride(songItem)
                 MediaItem.Builder()
