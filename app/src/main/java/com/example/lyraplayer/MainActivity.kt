@@ -1443,7 +1443,8 @@ private fun LyraApp() {
                     if (tree != null) visit(tree, 0)
                 }
             }
-            songs = found.values.toList()
+            // Pastikan daftar lagu dibersihkan dari duplikat berdasarkan jalur file (filePath) atau ID
+songs = found.values.distinctBy { if (it.filePath.isNotBlank()) it.filePath else it.id }.toList()
             status = if (songs.isEmpty()) "Belum ada lagu ditemukan." else "${songs.size} file audio siap diputar."
         } catch (e: Exception) { status = "Gagal membaca musik: ${e.message}" }
     }
