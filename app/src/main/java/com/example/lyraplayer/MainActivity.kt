@@ -1557,54 +1557,89 @@ songs = found.values.distinctBy { if (it.filePath.isNotBlank()) it.filePath else
         val c = controller ?: run { status = "Pemutar sedang disiapkan."; return }
         if (list.isEmpty() || index !in list.indices) return
         
-        val items = list.map { rawSong ->
-            val s = applyTrackOverride(rawSong)
-            // Jika ini lagu streaming YouTube Music (berawalan ytm://), langsung set MediaId & Uri-nya
-            MediaItem.Builder()
-                .setUri(s.uri)
-                .setMediaId(s.id)
-                .setMediaMetadata(
-                    MediaMetadata.Builder()
-                        .setTitle(s.title)
-                        .setArtist(s.artist)
-                        .setAlbumTitle(s.album)
-                        .setArtworkUri(s.artworkUri)
+        val rawSong = list[index]
+        val s = applyTrackOverride(rawSong)
+        val uriStr = s.uri.toString()
+
+        // Jika ini lagu YouTube Music, ambil URL stream aslinya dulu sebelum diputar
+        if (uriStr.startsWith("ytm://")) {
+            status = "Menyiapkan streaming YouTube Music..."
+            scope.launch(Dispatchers.IO) {
+                val videoId = s.uri.host ?: s.uri.lastPathSegment.orEmpty()
+                val realStreamUrl = YtmClient.resolveStreamUrl(videoId)
+                withContext(Dispatchers.Main) {
+                    if (realStreamUrl.isNullOrBlank()) {
+                        status = "Gagal memuat streaming lagu online."
+                        return@withContext
+                    }
+                    val onlineUri = Uri.parse(realStreamUrl)
+                    val mediaItem = MediaItem.Builder()
+                        .setUri(onlineUri)
+                        .setMediaId(s.id)
+                        .setMediaMetadata(
+                            MediaMetadata.Builder()
+                                .setTitle(s.title)
+                                .setArtist(s.artist)
+                                .setAlbumTitle(s.album)
+                                .setArtworkUri(s.artworkUri)
+                                .build()
+                        )
                         .build()
-                )
-                .build()
+
+                    c.setMediaItem(mediaItem)
+                    c.prepare()
+                    runCatching { c.volume = 1.0f }
+                    c.play()
+                    status = "Memutar online: ${s.title}"
+                }
+            }
+        } else {
+            // Pemutaran normal untuk file lagu lokal
+            val items = list.map { songItem ->
+                val track = applyTrackOverride(songItem)
+                MediaItem.Builder()
+                    .setUri(track.uri)
+                    .setMediaId(track.id)
+                    .setMediaMetadata(
+                        MediaMetadata.Builder()
+                            .setTitle(track.title)
+                            .setArtist(track.artist)
+                            .setAlbumTitle(track.album)
+                            .setArtworkUri(track.artworkUri)
+                            .build()
+                    )
+                    .build()
+            }
+            c.setMediaItems(items, index, 0L)
+            c.prepare()
+            runCatching { c.volume = 1.0f }
+            c.play()
+            status = "Memutar lokal: ${s.title}"
         }
 
-        c.setMediaItems(items, index, 0L)
-        c.prepare()
-        runCatching { c.volume = 1.0f }
-        c.play()
-
-        val tr = applyTrackOverride(list[index])
-        currentTitle = tr.title
-        currentArtist = tr.artist
-        currentAlbum = tr.album
-        currentUri = tr.uri
+        currentTitle = s.title
+        currentArtist = s.artist
+        currentAlbum = s.album
+        currentUri = s.uri
         loopStartMs = null
         loopEndMs = null
 
-        val (cleanT, cleanA) = cleanSearchQuery(tr.title, tr.artist)
+        val (cleanT, cleanA) = cleanSearchQuery(s.title, s.artist)
         searchTrack = cleanT
         searchArtist = cleanA
 
-        val newRecent = (listOf(tr.id) + lastPlayed.filterNot { it == tr.id }).take(60)
+        val newRecent = (listOf(s.id) + lastPlayed.filterNot { it == s.id }).take(60)
         lastPlayed = newRecent
-        val updatedCounts = playCounts.toMutableMap().also { it[tr.id] = (it[tr.id] ?: 0) + 1 }
+        val updatedCounts = playCounts.toMutableMap().also { it[s.id] = (it[s.id] ?: 0) + 1 }
         playCounts = updatedCounts
 
         prefs.edit()
-            .putString("current_title", tr.title)
-            .putString("current_artist", tr.artist)
-            .putString("current_album", tr.album)
+            .putString("current_title", s.title)
+            .putString("current_artist", s.artist)
+            .putString("current_album", s.album)
             .putString("recent_ids", newRecent.joinToString("|"))
             .putString("play_counts_json", serializeCounts(updatedCounts).toString())
             .apply()
-
-        status = "Memutar: ${tr.title}"
     }
 
     DisposableEffect(context) {
@@ -2059,11 +2094,40 @@ songs = found.values.distinctBy { if (it.filePath.isNotBlank()) it.filePath else
                             Column(Modifier.weight(1f).clickable { openMetadataEditor(currentTrack) }) {
                                 Text(currentTitle, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 Text("${currentArtist.ifBlank { "Artis tidak diketahui" }} · ${currentAlbum.ifBlank { "Album tidak diketahui" }}", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.secondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                
+                                // Tombol Unduh Instan jika lagu yang diputar berasal dari YouTube Music Online
+                                val isYtmCurrent = currentUri?.toString()?.startsWith("ytm://") == true || currentTrack?.id?.startsWith("ytm:") == true
+                                if (isYtmCurrent) {
+                                    Spacer(Modifier.height(2.dp))
+                                    Surface(
+                                        shape = RoundedCornerShape(8.dp),
+                                        color = MaterialTheme.colorScheme.primaryContainer,
+                                        modifier = Modifier.clickable {
+                                            val videoId = currentUri?.host ?: currentUri?.lastPathSegment ?: currentTrack?.id?.removePrefix("ytm:") ?: ""
+                                            if (videoId.isNotBlank()) {
+                                                scope.launch(Dispatchers.IO) {
+                                                    val success = YtmClient.downloadSongToDevice(
+                                                        context,
+                                                        YtmTrackItem(videoId, currentTitle, currentArtist, currentAlbum, duration, "", currentTrack?.artworkUri?.toString().orEmpty())
+                                                    )
+                                                    withContext(Dispatchers.Main) {
+                                                        status = if (success) "Unduhan disimpan ke folder Music/LyraDownloads!" else "Gagal mengunduh lagu."
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    ) {
+                                        Text(
+                                            "↓ Unduh Lagu Ini ke Perangkat",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                        )
+                                    }
+                                }
                             }
                             val isFavNow = currentTrack?.id?.let { it in favoriteIds } == true
-                            KeepScreenOnEffect(enabled = true)
-                            val configuration = LocalConfiguration.current
-                            val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
                             IconButton(onClick = { currentTrack?.let { toggleFavorite(it) } }) { LyraVectorIcon(if (isFavNow) LyraIconType.HEART_FILLED else LyraIconType.HEART_OUTLINE, tint = if (isFavNow) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface, size = 24.dp) }
                             FilledTonalIconButton(onClick = { openMetadataEditor(currentTrack) }) { LyraVectorIcon(LyraIconType.EDIT, tint = MaterialTheme.colorScheme.primary, size = 18.dp) }
                         }
