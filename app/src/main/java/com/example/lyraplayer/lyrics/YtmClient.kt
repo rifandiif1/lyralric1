@@ -147,54 +147,24 @@ object YtmClient {
 
     // Fungsi pemecah URL stream yang dioptimalkan menggunakan client WEB & ANDROID_TESTSUITE
  fun resolveStreamUrl(videoId: String): String? {
-        // Menggunakan layanan publik stabil yang menyediakan direct audio stream YouTube tanpa blokir
-        val proxyEndpoints = listOf(
-            "https://piped.video/latest/api/streams/$videoId",
-            "https://invidious.privacyredirect.com/api/v1/videos/$videoId",
-            "https://vid.puffyan.us/api/v1/videos/$videoId"
-        )
-
-        for (endpoint in proxyEndpoints) {
-            runCatching {
-                val conn = (URL(endpoint).openConnection() as HttpURLConnection).apply {
-                    requestMethod = "GET"
-                    connectTimeout = 8000
-                    readTimeout = 8000
-                    setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
-                }
-                
-                if (conn.responseCode in 200..299) {
-                    val respStr = conn.inputStream.bufferedReader().use { it.readText() }
-                    val json = JSONObject(respStr)
-                    
-                    // Cek format Piped atau Invidious API
-                    val audioStreams = json.optJSONArray("audioStreams") ?: json.optJSONArray("adaptiveFormats")
-                    if (audioStreams != null && audioStreams.length() > 0) {
-                        var bestUrl = ""
-                        var maxBitrate = 0
-                        for (i in 0 until audioStreams.length()) {
-                            val stream = audioStreams.optJSONObject(i) ?: continue
-                            val url = stream.optString("url").ifBlank { stream.optString("query") }
-                            val bitrate = stream.optInt("bitrate", 0)
-                            if (url.isNotBlank() && bitrate >= maxBitrate) {
-                                maxBitrate = bitrate
-                                bestUrl = url
-                            }
-                        }
-                        if (bestUrl.isNotBlank()) return bestUrl
-                    }
-                }
-            }
-        }
-
-        // Fallback terakhir: Menggunakan format public streaming langsung
         return runCatching {
-            val fallbackConn = (URL("https://api.cobalt.tools/api/json") // atau layanan penarik stream publik
-                .openConnection() as HttpURLConnection).apply {
-                // Jika server lokal Node.js (server.js) milikmu aktif di Vercel atau komputer, 
-                // kamu juga bisa mengarahkannya langsung ke server Node.js milikmu sendiri di sini!
+            // Ganti URL di bawah dengan alamat server Node.js / Vercel milikmu yang sebenarnya
+            val serverBaseUrl = "https://musikk-delta.vercel.app" 
+            val apiUrl = "$serverBaseUrl/api/stream-url?videoId=$videoId"
+            
+            val conn = (URL(apiUrl).openConnection() as HttpURLConnection).apply {
+                requestMethod = "GET"
+                connectTimeout = 8000
+                readTimeout = 8000
             }
-            null
+            
+            if (conn.responseCode in 200..299) {
+                val respStr = conn.inputStream.bufferedReader().use { it.readText() }
+                val json = JSONObject(respStr)
+                json.optString("url").takeIf { it.isNotBlank() }
+            } else {
+                null
+            }
         }.getOrNull()
     }
 
