@@ -7,9 +7,9 @@ import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
-import java.io.File
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.File
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
@@ -85,42 +85,7 @@ object YtmClient {
         }
         return out.distinctBy { it.videoId }
     }
-// Fungsi untuk Mengunduh Lagu YouTube Music ke Folder Musik HP
-    fun downloadSongToDevice(context: Context, track: YtmTrackItem): Boolean {
-        return runCatching {
-            val streamUrl = resolveStreamUrl(track.videoId) ?: return false
-            val url = URL(streamUrl)
-            val connection = url.openConnection() as HttpURLConnection
-            connection.connect()
 
-            val cleanTitle = track.title.replace(Regex("[^a-zA-Z0-9_-]"), "_").take(40)
-            val fileName = "YT_Music_${cleanTitle}_${track.videoId}.m4a"
-
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                val values = ContentValues().apply {
-                    put(MediaStore.Audio.Media.DISPLAY_NAME, fileName)
-                    put(MediaStore.Audio.Media.MIME_TYPE, "audio/mp4")
-                    put(MediaStore.Audio.Media.RELATIVE_PATH, Environment.DIRECTORY_MUSIC + "/LyraDownloads")
-                }
-                val resolver = context.contentResolver
-                val uri = resolver.insert(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, values) ?: return false
-                resolver.openOutputStream(uri)?.use { output ->
-                    connection.inputStream.use { input -> input.copyTo(output) }
-                }
-            } else {
-                val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), "LyraDownloads")
-                if (!dir.exists()) dir.mkdirs()
-                val file = File(dir, fileName)
-                file.outputStream().use { output ->
-                    connection.inputStream.use { input -> input.copyTo(output) }
-                }
-                // Scan media agar masuk ke database galeri HP
-                val scanIntent = Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE, Uri.fromFile(file))
-                context.sendBroadcast(scanIntent)
-            }
-            true
-        }.getOrDefault(false)
-    }
     fun fetchHomeSections(): List<YtmHomeSection> {
         val body = JSONObject().put("browseId", "FEmusic_home")
         val root = postWebRemix("browse", body)
@@ -180,45 +145,42 @@ object YtmClient {
         return out.distinctBy { it.videoId }
     }
 
+    // Fungsi pemecah URL stream yang dioptimalkan menggunakan client WEB & ANDROID_TESTSUITE
     fun resolveStreamUrl(videoId: String): String? {
-        val clients = listOf(
+        val payloads = listOf(
             Triple(
-                "ANDROID_VR",
-                "1.56.21",
-                "com.google.android.apps.youtube.vr.oculus/1.56.21 (Linux; U; Android 12; en_US; Quest 3; Build/SQ3A.220605.009.A1; Cronet/107.0.5284.2)"
+                "WEB",
+                "2.20240501.01.00",
+                JSONObject().put("clientName", "WEB").put("clientVersion", "2.20240501.01.00").put("hl", "id").put("gl", "ID")
             ),
             Triple(
-                "IOS",
-                "19.29.1",
-                "com.google.ios.youtube/19.29.1 (iPhone16,2; U; CPU iOS 17_5_1 like Mac OS X;)"
+                "ANDROID_TESTSUITE",
+                "1.9",
+                JSONObject().put("clientName", "ANDROID_TESTSUITE").put("clientVersion", "1.9").put("androidSdkVersion", 30).put("osName", "Android").put("osVersion", "11").put("hl", "id").put("gl", "ID")
             )
         )
 
-        for ((cName, cVer, ua) in clients) {
+        for ((_, _, clientObj) in payloads) {
             runCatching {
-                val clientObj = JSONObject()
-                    .put("clientName", cName)
-                    .put("clientVersion", cVer)
-                    .put("hl", "id")
-                    .put("gl", "ID")
-                if (cName == "IOS") {
-                    clientObj.put("deviceMake", "Apple").put("deviceModel", "iPhone16,2").put("osName", "iPhone").put("osVersion", "17.5.1.21F90")
-                } else {
-                    clientObj.put("androidSdkVersion", 32).put("osName", "Android").put("osVersion", "12")
-                }
                 val body = JSONObject()
                     .put("videoId", videoId)
                     .put("contentCheckOk", true)
                     .put("racyCheckOk", true)
-                    .put("context", JSONObject().put("context", JSONObject().put("client", clientObj))) // Perbaikan struktur context YTM
+                    .put("context", JSONObject().put("client", clientObj))
 
                 val json = postJson(
                     "https://www.youtube.com/youtubei/v1/player?prettyPrint=false",
                     body,
-                    mapOf("User-Agent" to ua)
+                    mapOf(
+                        "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                        "Origin" to "https://www.youtube.com",
+                        "Referer" to "https://www.youtube.com/watch?v=$videoId"
+                    )
                 )
+
+                val streamingData = json.optJSONObject("streamingData") ?: continue
+                val adaptive = streamingData.optJSONArray("adaptiveFormats") ?: streamingData.optJSONArray("formats") ?: continue
                 
-                val adaptive = json.optJSONObject("streamingData")?.optJSONArray("adaptiveFormats") ?: json.optJSONObject("streamingData")?.optJSONArray("formats") ?: return@runCatching
                 var bestUrl: String? = null
                 var highestBitrate = 0
 
@@ -226,12 +188,11 @@ object YtmClient {
                     val fmt = adaptive.optJSONObject(i) ?: continue
                     val mime = fmt.optString("mimeType")
                     val url = fmt.optString("url")
-                    
-                    // Cari format audio yang valid (prioritaskan mp4a / m4a)
-                    if (mime.startsWith("audio/") && url.isNotBlank()) {
+
+                    if ((mime.startsWith("audio/") || mime.contains("mp4a") || mime.contains("opus")) && url.isNotBlank()) {
                         val bitrate = fmt.optInt("bitrate", 0)
-                        val score = if (mime.contains("mp4a")) bitrate + 100_000 else bitrate
-                        if (score > highestBitrate) {
+                        val score = if (mime.contains("mp4a")) bitrate + 200_000 else bitrate
+                        if (score >= highestBitrate) {
                             highestBitrate = score
                             bestUrl = url
                         }
@@ -241,6 +202,41 @@ object YtmClient {
             }
         }
         return null
+    }
+
+    fun downloadSongToDevice(context: Context, track: YtmTrackItem): Boolean {
+        return runCatching {
+            val streamUrl = resolveStreamUrl(track.videoId) ?: return false
+            val url = URL(streamUrl)
+            val connection = url.openConnection() as HttpURLConnection
+            connection.connect()
+
+            val cleanTitle = track.title.replace(Regex("[^a-zA-Z0-9_-]"), "_").take(40)
+            val fileName = "YT_Music_${cleanTitle}_${track.videoId}.m4a"
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val values = ContentValues().apply {
+                    put(MediaStore.Audio.Media.DISPLAY_NAME, fileName)
+                    put(MediaStore.Audio.Media.MIME_TYPE, "audio/mp4")
+                    put(MediaStore.Audio.Media.RELATIVE_PATH, Environment.DIRECTORY_MUSIC + "/LyraDownloads")
+                }
+                val resolver = context.contentResolver
+                val uri = resolver.insert(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, values) ?: return false
+                resolver.openOutputStream(uri)?.use { output ->
+                    connection.inputStream.use { input -> input.copyTo(output) }
+                }
+            } else {
+                val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), "LyraDownloads")
+                if (!dir.exists()) dir.mkdirs()
+                val file = File(dir, fileName)
+                file.outputStream().use { output ->
+                    connection.inputStream.use { input -> input.copyTo(output) }
+                }
+                val scanIntent = Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE, Uri.fromFile(file))
+                context.sendBroadcast(scanIntent)
+            }
+            true
+        }.getOrDefault(false)
     }
 
     private fun parseListItem(r: JSONObject): YtmTrackItem? {
@@ -280,7 +276,7 @@ object YtmClient {
 
     private fun cleanDisplayTitle(raw: String): String {
         return raw
-            .replace(Regex("(?i)\\s*[\\(\\[]\\s*(official|hd|4k|music|lyric|lyrics|audio|video|visualizer|mv)[^\\)\\]]*[\\)\\]]"), "")
+            .replace(Regex("(?i)\\s*[\\(\\[]\\s*(official|hd|4k|music|lyric|lyrics|audio|video|visualizer|mv)[^\\)\\]]*[\\(\\]]"), "")
             .replace(Regex("(?i)\\s*-\\s*(official|lyric|lyrics|audio|video|visualizer|topic).*$"), "")
             .trim()
             .ifBlank { raw.trim() }
