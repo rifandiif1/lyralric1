@@ -171,62 +171,70 @@ object YtmClient {
     // =========================================================================
     // MESIN STREAMING & DOWNLOAD MULTI-LAPIS (PASTI TEMBUS)
     // =========================================================================
+    // Ekstraksi langsung dari HP menggunakan Klien IOS YouTube (Lolos dari blokir datacenter)
     fun resolveStreamUrl(videoId: String): String? {
         if (videoId.isBlank() || videoId.startsWith("browse_")) return null
-        val ytUrl = "https://www.youtube.com/watch?v=$videoId"
-        val encodedYtUrl = URLEncoder.encode(ytUrl, "UTF-8")
+        
+        return runCatching {
+            val clientObj = JSONObject()
+                .put("clientName", "IOS")
+                .put("clientVersion", "19.29.1")
+                .put("deviceMake", "Apple")
+                .put("deviceModel", "iPhone16,2")
+                .put("osName", "iPhone")
+                .put("osVersion", "17.5.1.21F90")
+                .put("hl", "id")
+                .put("gl", "ID")
 
-        // JALUR 1: Panggil BetaBotz LANGSUNG dari HP (Menggunakan IP HP kamu sendiri, bukan IP Vercel!)
-        runCatching {
-            val betaUrl = "https://api.betabotz.eu.org/api/download/ytmp3?apikey=RFSTOREPBG&url=$encodedYtUrl"
-            val json = httpGetJson(betaUrl)
-            val mp3 = json?.optJSONObject("result")?.optString("mp3").orEmpty()
-            if (mp3.startsWith("http")) return mp3
-        }
+            val body = JSONObject()
+                .put("videoId", videoId)
+                .put("contentCheckOk", true)
+                .put("racyCheckOk", true)
+                .put("context", JSONObject().put("client", clientObj))
 
-        // JALUR 2: Mesin LOADER.TO / SAVENOW.TO (Persis dari server.js baris 376-420 milikmu!)
-        runCatching {
-            val startUrl = "https://loader.to/ajax/download.php?format=mp3&url=$encodedYtUrl"
-            val startJson = httpGetJson(startUrl, mapOf("Referer" to "https://loader.to/"))
-            if (startJson != null && startJson.optBoolean("success")) {
-                val jobId = startJson.optString("id")
-                val progressUrl = startJson.optString("progress_url")
-                    .ifBlank { "https://p.savenow.to/api/progress?id=$jobId" }
+            val conn = (URL("https://www.youtube.com/youtubei/v1/player?prettyPrint=false").openConnection() as HttpURLConnection).apply {
+                requestMethod = "POST"
+                doOutput = true
+                connectTimeout = 10_000
+                readTimeout = 10_000
+                setRequestProperty("Content-Type", "application/json; charset=utf-8")
+                setRequestProperty("User-Agent", "com.google.ios.youtube/19.29.1 (iPhone16,2; U; CPU iOS 17_5_1 like Mac OS X;)")
+                setRequestProperty("Origin", "https://www.youtube.com")
+                setRequestProperty("Referer", "https://www.youtube.com/watch?v=$videoId")
+            }
 
-                // Polling sampai konversi MP3 selesai (maksimal ~15 detik)
-                for (attempt in 1..12) {
-                    val progJson = httpGetJson(progressUrl, mapOf("Referer" to "https://loader.to/"))
-                    val dlUrl = progJson?.optString("download_url").orEmpty()
-                    if (dlUrl.startsWith("http")) {
-                        return dlUrl
+            conn.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
+            
+            if (conn.responseCode in 200..299) {
+                val respStr = conn.inputStream.bufferedReader().use { it.readText() }
+                val json = JSONObject(respStr)
+                
+                val streamingData = json.optJSONObject("streamingData") ?: return@runCatching null
+                val adaptive = streamingData.optJSONArray("adaptiveFormats") ?: streamingData.optJSONArray("formats") ?: return@runCatching null
+
+                var bestUrl = ""
+                var highestBitrate = 0
+
+                for (i in 0 until adaptive.length()) {
+                    val fmt = adaptive.optJSONObject(i) ?: continue
+                    val mime = fmt.optString("mimeType")
+                    val url = fmt.optString("url")
+
+                    // Cari format audio (utamakan mp4a / m4a yang kompatibel dengan ExoPlayer)
+                    if (mime.startsWith("audio/") && url.isNotBlank()) {
+                        val bitrate = fmt.optInt("bitrate", 0)
+                        val score = if (mime.contains("mp4a")) bitrate + 300_000 else bitrate
+                        if (score >= highestBitrate) {
+                            highestBitrate = score
+                            bestUrl = url
+                        }
                     }
-                    Thread.sleep(1300)
                 }
+                if (bestUrl.isNotBlank()) bestUrl else null
+            } else {
+                null
             }
-        }
-
-        // JALUR 3: API Vreden / Ryzendesu / Siputzx (API Publik Indonesia Tanpa Whitelist IP)
-        val publicApis = listOf(
-            "https://api.siputzx.my.id/api/d/ytmp3?url=$encodedYtUrl",
-            "https://api.ryzendesu.vip/api/downloader/ytmp3?url=$encodedYtUrl",
-            "https://api.vreden.my.id/api/ytmp3?url=$encodedYtUrl"
-        )
-        for (api in publicApis) {
-            runCatching {
-                val j = httpGetJson(api) ?: return@runCatching
-                // Cek berbagai kemungkinan letak URL mp3 di JSON response
-                val dataObj = j.optJSONObject("data") ?: j.optJSONObject("result")
-                val link = dataObj?.optString("dl")
-                    ?.ifBlank { dataObj.optString("url") }
-                    ?.ifBlank { dataObj.optString("mp3") }
-                    ?.ifBlank { dataObj.optString("downloadUrl") }
-                    ?.ifBlank { dataObj.optJSONObject("download")?.optString("url").orEmpty() }
-                    ?: j.optString("url")
-                if (!link.isNullOrBlank() && link.startsWith("http")) return link
-            }
-        }
-
-        return null
+        }.getOrNull()
     }
 
     fun downloadSongToDevice(context: Context, track: YtmTrackItem): Boolean {
