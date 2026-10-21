@@ -783,13 +783,39 @@ private fun SettingRow(title: String, description: String, checked: Boolean, onC
 }
 
 @Composable
-private fun TrackList(tracks: List<AudioTrack>, currentUri: Uri?, playing: Boolean, favoriteIds: Set<String>, playTracks: (List<AudioTrack>, Int) -> Unit, toggleFavorite: (AudioTrack) -> Unit, onAddToPlaylist: (AudioTrack) -> Unit, onEditTrack: (AudioTrack) -> Unit, showFolder: Boolean, modifier: Modifier = Modifier) {
-    if (tracks.isEmpty()) { EmptyState("Tidak ada lagu yang cocok", "Ubah kata kunci pencarian, kurangi filter durasi minimal, atau pindai ulang."); return }
+private fun TrackList(
+    tracks: List<AudioTrack>,
+    currentUri: Uri?,
+    playing: Boolean,
+    favoriteIds: Set<String>,
+    playTracks: (List<AudioTrack>, Int) -> Unit,
+    toggleFavorite: (AudioTrack) -> Unit,
+    onAddToPlaylist: (AudioTrack) -> Unit,
+    onEditTrack: (AudioTrack) -> Unit,
+    showFolder: Boolean,
+    modifier: Modifier = Modifier,
+    scope: kotlinx.coroutines.CoroutineScope? = null,
+    context: Context? = null,
+    onStatusChange: ((String) -> Unit)? = null
+) {
+    if (tracks.isEmpty()) {
+        EmptyState("Tidak ada lagu yang cocok", "Ubah kata kunci pencarian atau pindai ulang.")
+        return
+    }
     LazyColumn(modifier.fillMaxWidth(), contentPadding = PaddingValues(bottom = 14.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
         items(tracks, key = { it.id }) { song ->
-            val isCurrent = song.uri == currentUri; val isFav = song.id in favoriteIds
-            val addedStr = remember(song.dateAddedSec) { formatAddedDate(song.dateAddedSec) }
-            Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(if (isCurrent) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f) else Color.Transparent).clickable { playTracks(tracks, tracks.indexOfFirst { it.id == song.id }) }.padding(vertical = 8.dp, horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+            val isCurrent = song.uri == currentUri
+            val isFav = song.id in favoriteIds
+            val isOnlineYtm = song.uri.toString().startsWith("ytm://") // Deteksi apakah ini lagu YouTube Music
+
+            Row(
+                Modifier.fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(if (isCurrent) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f) else Color.Transparent)
+                    .clickable { playTracks(tracks, tracks.indexOfFirst { it.id == song.id }) }
+                    .padding(vertical = 8.dp, horizontal = 6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
                 Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surfaceVariant, modifier = Modifier.size(48.dp)) {
                     if (song.artworkUri != null) AsyncImage(model = song.artworkUri, contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
                     else Box(contentAlignment = Alignment.Center) { if (isCurrent && playing) LyraBrandLogo(size = 48.dp, cornerRadius = 12.dp) else LyraVectorIcon(LyraIconType.MUSIC, tint = MaterialTheme.colorScheme.secondary, size = 22.dp) }
@@ -798,14 +824,31 @@ private fun TrackList(tracks: List<AudioTrack>, currentUri: Uri?, playing: Boole
                     Text(song.title, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = if (isCurrent) FontWeight.ExtraBold else FontWeight.SemiBold, color = if (isCurrent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         if (song.duration > 0L) Text(formatTime(song.duration), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
-                        Text("${song.artist} · ${song.album}", maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    if (showFolder && (song.folder.isNotBlank() || addedStr.isNotBlank())) {
-                        val subInfo = listOfNotNull(addedStr.takeIf { it.isNotBlank() }?.let { "Ditambahkan $it" }, song.folder.takeIf { it.isNotBlank() }).joinToString(" • ")
-                        Text(subInfo, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+                        Text(if (isOnlineYtm) "YouTube Music Online" else "${song.artist} · ${song.album}", maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
-                IconButton(onClick = { onEditTrack(song) }, modifier = Modifier.size(34.dp)) { LyraVectorIcon(LyraIconType.EDIT, tint = MaterialTheme.colorScheme.onSurfaceVariant, size = 18.dp) }
+
+                // TOMBOL DOWNLOAD KHUSUS LAGU ONLINE YTM
+                if (isOnlineYtm && scope != null && context != null) {
+                    IconButton(
+                        onClick = {
+                            val videoId = song.uri.host ?: song.uri.lastPathSegment.orEmpty()
+                            scope.launch(Dispatchers.IO) {
+                                val success = YtmClient.downloadSongToDevice(
+                                    context,
+                                    YtmTrackItem(videoId, song.title, song.artist, song.album, song.duration, "", song.artworkUri?.toString().orEmpty())
+                                )
+                                withContext(Dispatchers.Main) {
+                                    onStatusChange?.invoke(if (success) "Unduhan berhasil disimpan ke folder Music!" else "Gagal mengunduh lagu.")
+                                }
+                            }
+                        },
+                        modifier = Modifier.size(34.dp)
+                    ) {
+                        Text("↓", fontWeight = FontWeight.Black, fontSize = 16.sp, color = MaterialTheme.colorScheme.primary)
+                    }
+                }
+
                 IconButton(onClick = { toggleFavorite(song) }, modifier = Modifier.size(34.dp)) { LyraVectorIcon(if (isFav) LyraIconType.HEART_FILLED else LyraIconType.HEART_OUTLINE, tint = if (isFav) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant, size = 18.dp) }
                 IconButton(onClick = { onAddToPlaylist(song) }, modifier = Modifier.size(34.dp)) { LyraVectorIcon(LyraIconType.PLUS, tint = MaterialTheme.colorScheme.onSurfaceVariant, size = 18.dp) }
             }
@@ -813,7 +856,6 @@ private fun TrackList(tracks: List<AudioTrack>, currentUri: Uri?, playing: Boole
         }
     }
 }
-
 @Composable
 private fun KaraokeWordText(line: KaraokeLine, positionMs: Long, isCurrentLine: Boolean, fontSizeSp: Int, accentColor: Color, textAlign: TextAlign = TextAlign.Center, modifier: Modifier = Modifier) {
     val sungColor = Color.White
@@ -1514,19 +1556,54 @@ songs = found.values.distinctBy { if (it.filePath.isNotBlank()) it.filePath else
     fun playTracks(list: List<AudioTrack>, index: Int) {
         val c = controller ?: run { status = "Pemutar sedang disiapkan."; return }
         if (list.isEmpty() || index !in list.indices) return
+        
         val items = list.map { rawSong ->
             val s = applyTrackOverride(rawSong)
-            MediaItem.Builder().setUri(s.uri).setMediaId(s.id).setMediaMetadata(MediaMetadata.Builder().setTitle(s.title).setArtist(s.artist).setAlbumTitle(s.album).setArtworkUri(s.artworkUri).build()).build()
+            // Jika ini lagu streaming YouTube Music (berawalan ytm://), langsung set MediaId & Uri-nya
+            MediaItem.Builder()
+                .setUri(s.uri)
+                .setMediaId(s.id)
+                .setMediaMetadata(
+                    MediaMetadata.Builder()
+                        .setTitle(s.title)
+                        .setArtist(s.artist)
+                        .setAlbumTitle(s.album)
+                        .setArtworkUri(s.artworkUri)
+                        .build()
+                )
+                .build()
         }
-        c.setMediaItems(items, index, 0L); c.prepare(); runCatching { c.volume = 1.0f }; c.play()
+
+        c.setMediaItems(items, index, 0L)
+        c.prepare()
+        runCatching { c.volume = 1.0f }
+        c.play()
+
         val tr = applyTrackOverride(list[index])
-        currentTitle = tr.title; currentArtist = tr.artist; currentAlbum = tr.album; currentUri = tr.uri
-        loopStartMs = null; loopEndMs = null
+        currentTitle = tr.title
+        currentArtist = tr.artist
+        currentAlbum = tr.album
+        currentUri = tr.uri
+        loopStartMs = null
+        loopEndMs = null
+
         val (cleanT, cleanA) = cleanSearchQuery(tr.title, tr.artist)
-        searchTrack = cleanT; searchArtist = cleanA
-        val newRecent = (listOf(tr.id) + lastPlayed.filterNot { it == tr.id }).take(60); lastPlayed = newRecent
-        val updatedCounts = playCounts.toMutableMap().also { it[tr.id] = (it[tr.id] ?: 0) + 1 }; playCounts = updatedCounts
-        prefs.edit().putString("current_title", tr.title).putString("current_artist", tr.artist).putString("current_album", tr.album).putString("recent_ids", newRecent.joinToString("|")).putString("play_counts_json", serializeCounts(updatedCounts).toString()).apply()
+        searchTrack = cleanT
+        searchArtist = cleanA
+
+        val newRecent = (listOf(tr.id) + lastPlayed.filterNot { it == tr.id }).take(60)
+        lastPlayed = newRecent
+        val updatedCounts = playCounts.toMutableMap().also { it[tr.id] = (it[tr.id] ?: 0) + 1 }
+        playCounts = updatedCounts
+
+        prefs.edit()
+            .putString("current_title", tr.title)
+            .putString("current_artist", tr.artist)
+            .putString("current_album", tr.album)
+            .putString("recent_ids", newRecent.joinToString("|"))
+            .putString("play_counts_json", serializeCounts(updatedCounts).toString())
+            .apply()
+
         status = "Memutar: ${tr.title}"
     }
 
