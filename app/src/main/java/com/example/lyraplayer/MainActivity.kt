@@ -67,6 +67,8 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import android.content.res.Configuration
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.core.content.ContextCompat
 import androidx.documentfile.provider.DocumentFile
 import androidx.media3.common.MediaItem
@@ -868,8 +870,7 @@ private fun KaraokeMiniStage(lines: List<KaraokeLine>, positionMs: Long, hasEnha
         }
     }
 }
-import android.content.res.Configuration
-import androidx.compose.ui.platform.LocalConfiguration
+
 @Composable
 // Di dalam composable LyraApp atau di atas KaraokeFullStage, kita bisa cek orientasi:
 
@@ -2619,7 +2620,7 @@ private fun LyraApp() {
         )
     }
     // --- Letakkan di sini (di luar Composable manapun, misalnya di bagian bawah MainActivity.kt) ---
-private fun toggleFloatingLyric(context: Context) {
+fun toggleFloatingLyric(context: Context) {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(context)) {
         val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${context.packageName}"))
         context.startActivity(intent)
