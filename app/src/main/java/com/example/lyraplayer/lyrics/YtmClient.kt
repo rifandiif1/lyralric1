@@ -146,7 +146,7 @@ object YtmClient {
     }
 
     // Fungsi pemecah URL stream yang dioptimalkan menggunakan client WEB & ANDROID_TESTSUITE
-    fun resolveStreamUrl(videoId: String): String? {
+   fun resolveStreamUrl(videoId: String): String? {
         val payloads = listOf(
             Triple(
                 "WEB",
@@ -178,8 +178,8 @@ object YtmClient {
                     )
                 )
 
-                val streamingData = json.optJSONObject("streamingData") ?: continue
-                val adaptive = streamingData.optJSONArray("adaptiveFormats") ?: streamingData.optJSONArray("formats") ?: continue
+                val streamingData = json.optJSONObject("streamingData") ?: return@runCatching // <-- Tambahkan @runCatching
+                val adaptive = streamingData.optJSONArray("adaptiveFormats") ?: streamingData.optJSONArray("formats") ?: return@runCatching // <-- Tambahkan @runCatching
                 
                 var bestUrl: String? = null
                 var highestBitrate = 0
