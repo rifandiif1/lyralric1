@@ -145,27 +145,73 @@ object YtmClient {
         return out.distinctBy { it.videoId }
     }
 
-    // Fungsi pemecah URL stream yang dioptimalkan menggunakan client WEB & ANDROID_TESTSUITE
- fun resolveStreamUrl(videoId: String): String? {
-        return runCatching {
-            // Ganti URL di bawah dengan alamat server Node.js / Vercel milikmu yang sebenarnya
-            val serverBaseUrl = "https://musikk-delta.vercel.app" 
-            val apiUrl = "$serverBaseUrl/api/stream-url?videoId=$videoId"
-            
-            val conn = (URL(apiUrl).openConnection() as HttpURLConnection).apply {
-                requestMethod = "GET"
-                connectTimeout = 8000
-                readTimeout = 8000
+    // Mengambil tautan audio streaming langsung secara mandiri di Android menggunakan Piped/Invidious API publik
+    fun resolveStreamUrl(videoId: String): String? {
+        val instances = listOf(
+            "https://pipedapi.kavin.rocks",
+            "https://pipedapi.adminforge.de",
+            "https://invidious.privacyredirect.com",
+            "https://vid.puffyan.us"
+        )
+
+        for (domain in instances) {
+            runCatching {
+                val apiUrl = if (domain.contains("piped")) {
+                    "$domain/streams/$videoId"
+                } else {
+                    "$domain/api/v1/videos/$videoId"
+                }
+
+                val conn = (URL(apiUrl).openConnection() as HttpURLConnection).apply {
+                    requestMethod = "GET"
+                    connectTimeout = 6000
+                    readTimeout = 6000
+                    setRequestProperty("User-Agent", "Mozilla/5.0")
+                }
+
+                if (conn.responseCode in 200..299) {
+                    val respStr = conn.inputStream.bufferedReader().use { it.readText() }
+                    val json = JSONObject(respStr)
+
+                    if (domain.contains("piped")) {
+                        val audioStreams = json.optJSONArray("audioStreams")
+                        if (audioStreams != null && audioStreams.length() > 0) {
+                            var bestUrl = ""
+                            var maxBit = 0
+                            for (i in 0 until audioStreams.length()) {
+                                val s = audioStreams.optJSONObject(i) ?: continue
+                                val url = s.optString("url")
+                                val bit = s.optInt("bitrate", 0)
+                                if (url.isNotBlank() && bit >= maxBit) {
+                                    maxBit = bit
+                                    bestUrl = url
+                                }
+                            }
+                            if (bestUrl.isNotBlank()) return bestUrl
+                        }
+                    } else {
+                        // Format Invidious
+                        val adaptive = json.optJSONArray("adaptiveFormats")
+                        if (adaptive != null && adaptive.length() > 0) {
+                            var bestUrl = ""
+                            var maxBit = 0
+                            for (i in 0 until adaptive.length()) {
+                                val s = adaptive.optJSONObject(i) ?: continue
+                                val type = s.optString("type")
+                                val url = s.optString("url")
+                                val bit = s.optInt("bitrate", 0)
+                                if (type.contains("audio") && url.isNotBlank() && bit >= maxBit) {
+                                    maxBit = bit
+                                    bestUrl = url
+                                }
+                            }
+                            if (bestUrl.isNotBlank()) return bestUrl
+                        }
+                    }
+                }
             }
-            
-            if (conn.responseCode in 200..299) {
-                val respStr = conn.inputStream.bufferedReader().use { it.readText() }
-                val json = JSONObject(respStr)
-                json.optString("url").takeIf { it.isNotBlank() }
-            } else {
-                null
-            }
-        }.getOrNull()
+        }
+        return null
     }
 
     fun downloadSongToDevice(context: Context, track: YtmTrackItem): Boolean {
