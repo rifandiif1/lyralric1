@@ -1751,39 +1751,141 @@ private fun LyraApp() {
             Column(Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp)) {
                 when (tab) {
                     LyraTab.HOME -> {
-                        Spacer(Modifier.height(10.dp))
-                        ElevatedCard(onClick = { tab = LyraTab.NOW_PLAYING }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(26.dp), colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
-                            Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                                if (currentTrack?.artworkUri != null) AsyncImage(model = currentTrack.artworkUri, contentDescription = null, modifier = Modifier.size(76.dp).clip(RoundedCornerShape(20.dp)), contentScale = ContentScale.Crop)
-                                else LyraBrandLogo(size = 76.dp, cornerRadius = 20.dp)
-                                Column(Modifier.weight(1f).padding(start = 14.dp)) {
-                                    Text("PLAYING NOW", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Black)
-                                    Text(currentTitle, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                    Text(currentArtist.ifBlank { "Pilih lagu untuk mulai" }, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                    Text("Lyricsify + LRCLIB · Urutan: ${sortOption.label}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 4.dp))
+                        var ytmHomeSections by remember { mutableStateOf<List<com.example.lyraplayer.lyrics.YtmHomeSection>>(emptyList()) }
+                        var isLoadingHome by remember { mutableStateOf(true) }
+
+                        LaunchedEffect(Unit) {
+                            if (ytmHomeSections.isEmpty()) {
+                                runCatching {
+                                    val secs = withContext(Dispatchers.IO) { YtmClient.fetchHomeSections() }
+                                    ytmHomeSections = secs
+                                }.onFailure {
+                                    ytmStatus = "Gagal memuat beranda YT Music"
                                 }
-                                FilledTonalIconButton(onClick = { if (currentUri != null || playing) togglePlayWithFade() else if (sortedAndFilteredSongs.isNotEmpty()) playTracks(sortedAndFilteredSongs, 0) }, modifier = Modifier.size(48.dp)) {
-                                    LyraVectorIcon(if (playing) LyraIconType.PAUSE else LyraIconType.PLAY, tint = MaterialTheme.colorScheme.primary, size = 22.dp)
-                                }
+                                isLoadingHome = false
                             }
                         }
-                        Spacer(Modifier.height(12.dp))
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                            SummaryCard("Lagu (≥${minDurationSec}s)", durationFilteredSongs.size.toString(), Modifier.weight(1f)) { librarySubTab = LibrarySubTab.ALL; tab = LyraTab.LIBRARY }
-                            SummaryCard("Folder", folderGroups.size.toString(), Modifier.weight(1f)) { librarySubTab = LibrarySubTab.FOLDERS; tab = LyraTab.LIBRARY }
-                            SummaryCard("Playlist", (playlists.size + 4).toString(), Modifier.weight(1f)) { librarySubTab = LibrarySubTab.PLAYLISTS; tab = LyraTab.LIBRARY }
-                        }
-                        Spacer(Modifier.height(10.dp))
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("Baru diputar", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-                            TextButton(onClick = { if (durationFilteredSongs.isNotEmpty()) { val ranked = durationFilteredSongs.sortedBy { (playCounts[it.id] ?: 0) * 10 + if (it.id in lastPlayed.take(12)) 100 else 0 }.shuffled(); playTracks(ranked, 0) } }) { Text("Acak Pintar") }
-                            TextButton(onClick = { librarySubTab = LibrarySubTab.ALL; tab = LyraTab.LIBRARY }) { Text("Semua") }
-                        }
-                        if (recentTracks.isEmpty()) EmptyState("Belum ada riwayat", "Putar lagu untuk mulai membuat riwayat lokal.")
-                        else TrackList(recentTracks.take(12), currentUri, playing, favoriteIds, ::playTracks, ::toggleFavorite, { trackToAdd = it }, { openMetadataEditor(it) }, false, Modifier.weight(1f))
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(vertical = 6.dp)) {
-                            OutlinedButton(onClick = { folderPicker.launch(null) }, modifier = Modifier.weight(1f)) { Text("Pilih folder") }
-                            OutlinedButton(onClick = { showSleepDialog = true }, modifier = Modifier.weight(1f)) { Text(if (sleepMinutes > 0) "Timer ($sleepMinutes mnt)" else "Timer tidur") }
+
+                        LazyColumn(modifier = Modifier.fillMaxWidth().weight(1f), verticalArrangement = Arrangement.spacedBy(14.dp), contentPadding = PaddingValues(bottom = 20.dp)) {
+                            item {
+                                Spacer(Modifier.height(6.dp))
+                                ElevatedCard(onClick = { tab = LyraTab.NOW_PLAYING }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(26.dp), colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+                                    Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                                        if (currentTrack?.artworkUri != null) AsyncImage(model = currentTrack.artworkUri, contentDescription = null, modifier = Modifier.size(76.dp).clip(RoundedCornerShape(20.dp)), contentScale = ContentScale.Crop)
+                                        else LyraBrandLogo(size = 76.dp, cornerRadius = 20.dp)
+                                        Column(Modifier.weight(1f).padding(start = 14.dp)) {
+                                            Text("PEMUTAR UTAMA", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Black)
+                                            Text(currentTitle, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                            Text(currentArtist.ifBlank { "Ketuk untuk membuka pemutar" }, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                            Text("Lokal + YouTube Music Streaming", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 4.dp))
+                                        }
+                                        FilledTonalIconButton(onClick = { if (currentUri != null || playing) togglePlayWithFade() else if (sortedAndFilteredSongs.isNotEmpty()) playTracks(sortedAndFilteredSongs, 0) }, modifier = Modifier.size(48.dp)) {
+                                            LyraVectorIcon(if (playing) LyraIconType.PAUSE else LyraIconType.PLAY, tint = MaterialTheme.colorScheme.primary, size = 22.dp)
+                                        }
+                                    }
+                                }
+                            }
+
+                            item {
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                                    SummaryCard("Lokal (${minDurationSec}s+)", durationFilteredSongs.size.toString(), Modifier.weight(1f)) { librarySubTab = LibrarySubTab.ALL; tab = LyraTab.LIBRARY }
+                                    SummaryCard("YT Music", "Online", Modifier.weight(1f)) { librarySubTab = LibrarySubTab.YT_MUSIC; tab = LyraTab.LIBRARY }
+                                    SummaryCard("Folder", folderGroups.size.toString(), Modifier.weight(1f)) { librarySubTab = LibrarySubTab.FOLDERS; tab = LyraTab.LIBRARY }
+                                }
+                            }
+
+                            // Bagian Beranda Rekomendasi YouTube Music ala Spotify
+                            item {
+                                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                                    Text("Rekomendasi YouTube Music", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                                    TextButton(onClick = { librarySubTab = LibrarySubTab.YT_MUSIC; tab = LyraTab.LIBRARY }) { Text("Cari Lainnya â†’") }
+                                }
+                            }
+
+                            if (isLoadingHome) {
+                                item {
+                                    Box(Modifier.fillMaxWidth().height(140.dp), contentAlignment = Alignment.Center) {
+                                        CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+                                    }
+                                }
+                            } else {
+                                items(ytmHomeSections, key = { it.title }) { section ->
+                                    Column(Modifier.fillMaxWidth()) {
+                                        Text(section.title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(bottom = 8.dp))
+                                        
+                                        // Baris horizontal scroll ala Spotify Carousel
+                                        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                            for (item in section.items) {
+                                                ElevatedCard(
+                                                    onClick = {
+                                                        if (item.videoId.isNotBlank() && !item.videoId.startsWith("browse_")) {
+                                                            val tr = ytmItemToAudioTrack(item)
+                                                            playTracks(listOf(tr), 0)
+                                                            status = "Streaming: ${tr.title}"
+                                                        } else {
+                                                            ytmQuery = item.title
+                                                            triggerYtmSearch(item.title)
+                                                            librarySubTab = LibrarySubTab.YT_MUSIC
+                                                            tab = LyraTab.LIBRARY
+                                                        }
+                                                    },
+                                                    shape = RoundedCornerShape(16.dp),
+                                                    modifier = Modifier.width(135.dp)
+                                                ) {
+                                                    Column(Modifier.padding(8.dp)) {
+                                                        Surface(
+                                                            shape = RoundedCornerShape(12.dp),
+                                                            color = MaterialTheme.colorScheme.surfaceVariant,
+                                                            modifier = Modifier.size(119.dp)
+                                                        ) {
+                                                            if (item.thumbnailUrl.isNotBlank()) {
+                                                                AsyncImage(model = item.thumbnailUrl, contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                                                            } else {
+                                                                Box(contentAlignment = Alignment.Center) { LyraBrandLogo(size = 54.dp, cornerRadius = 14.dp) }
+                                                            }
+                                                        }
+                                                        Spacer(Modifier.height(6.dp))
+                                                        Text(item.title, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                                        Text(item.artist, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            item {
+                                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 6.dp)) {
+                                    Text("Baru diputar di perangkat", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                                    TextButton(onClick = { librarySubTab = LibrarySubTab.ALL; tab = LyraTab.LIBRARY }) { Text("Semua") }
+                                }
+                            }
+                            if (recentTracks.isNotEmpty()) {
+                                items(recentTracks.take(8), key = { "recent_" + it.id }) { song ->
+                                    val isCurrent = song.uri == currentUri
+                                    val isFav = song.id in favoriteIds
+                                    Row(
+                                        Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp))
+                                            .background(if (isCurrent) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f) else Color.Transparent)
+                                            .clickable { playTracks(recentTracks, recentTracks.indexOfFirst { it.id == song.id }) }
+                                            .padding(vertical = 6.dp, horizontal = 4.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surfaceVariant, modifier = Modifier.size(42.dp)) {
+                                            if (song.artworkUri != null) AsyncImage(model = song.artworkUri, contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                                            else Box(contentAlignment = Alignment.Center) { LyraVectorIcon(LyraIconType.MUSIC, tint = MaterialTheme.colorScheme.secondary, size = 18.dp) }
+                                        }
+                                        Column(Modifier.weight(1f).padding(horizontal = 10.dp)) {
+                                            Text(song.title, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                                            Text("${song.artist} • ${song.album}", maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        }
+                                        IconButton(onClick = { toggleFavorite(song) }, modifier = Modifier.size(32.dp)) {
+                                            LyraVectorIcon(if (isFav) LyraIconType.HEART_FILLED else LyraIconType.HEART_OUTLINE, tint = if (isFav) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant, size = 16.dp)
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
 
