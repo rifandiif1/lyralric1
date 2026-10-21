@@ -2113,6 +2113,20 @@ songs = found.values.distinctBy { if (it.filePath.isNotBlank()) it.filePath else
                             Column(Modifier.weight(1f).clickable { openMetadataEditor(currentTrack) }) {
                                 Text(currentTitle, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 Text("${currentArtist.ifBlank { "Artis tidak diketahui" }} · ${currentAlbum.ifBlank { "Album tidak diketahui" }}", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.secondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+
+                                // === TARUH KODE STATUS DI SINI ===
+                                if (status.isNotBlank()) {
+                                    Spacer(Modifier.height(4.dp))
+                                    Text(
+                                        text = status,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        fontWeight = FontWeight.Bold,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                                // ================================
                                 
                                 // Tombol Unduh Instan jika lagu yang diputar berasal dari YouTube Music Online
                                 val isYtmCurrent = currentUri?.toString()?.startsWith("ytm://") == true || currentTrack?.id?.startsWith("ytm:") == true
