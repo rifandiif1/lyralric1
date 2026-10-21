@@ -1553,7 +1553,7 @@ songs = found.values.distinctBy { if (it.filePath.isNotBlank()) it.filePath else
         prefs.edit().putStringSet("favorites", favoriteIds).apply()
     }
 
-  fun playTracks(list: List<AudioTrack>, index: Int) {
+ fun playTracks(list: List<AudioTrack>, index: Int) {
         val c = controller ?: run { status = "Pemutar sedang disiapkan."; return }
         if (list.isEmpty() || index !in list.indices) return
         
@@ -1571,7 +1571,7 @@ songs = found.values.distinctBy { if (it.filePath.isNotBlank()) it.filePath else
             }
 
             scope.launch(Dispatchers.IO) {
-                // Ambil URL stream asli dari YouTube Music
+                // Ambil URL stream asli dari YtmClient
                 val realStreamUrl = runCatching { YtmClient.resolveStreamUrl(videoId) }.getOrNull()
                 
                 withContext(Dispatchers.Main) {
