@@ -24,6 +24,7 @@ import android.os.Environment
 import android.os.Handler
 import android.os.Looper
 import android.provider.MediaStore
+import android.provider.Settings
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -867,8 +868,11 @@ private fun KaraokeMiniStage(lines: List<KaraokeLine>, positionMs: Long, hasEnha
         }
     }
 }
-
+import android.content.res.Configuration
+import androidx.compose.ui.platform.LocalConfiguration
 @Composable
+// Di dalam composable LyraApp atau di atas KaraokeFullStage, kita bisa cek orientasi:
+
 private fun KaraokeFullStage(lines: List<KaraokeLine>, positionMs: Long, hasEnhancedTag: Boolean, autoWordKaraoke: Boolean, accentColor: Color, darkBgColor: Color, onToggleAutoWord: () -> Unit, onShareClick: () -> Unit, onSeekTo: (Long) -> Unit, onEditLyricsClick: () -> Unit, modifier: Modifier = Modifier) {
     KeepScreenOnEffect(enabled = true)
     val listState = rememberLazyListState()
@@ -1978,6 +1982,9 @@ private fun LyraApp() {
                                 Text("${currentArtist.ifBlank { "Artis tidak diketahui" }} · ${currentAlbum.ifBlank { "Album tidak diketahui" }}", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.secondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             }
                             val isFavNow = currentTrack?.id?.let { it in favoriteIds } == true
+                            KeepScreenOnEffect(enabled = true)
+                            val configuration = LocalConfiguration.current
+                            val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
                             IconButton(onClick = { currentTrack?.let { toggleFavorite(it) } }) { LyraVectorIcon(if (isFavNow) LyraIconType.HEART_FILLED else LyraIconType.HEART_OUTLINE, tint = if (isFavNow) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface, size = 24.dp) }
                             FilledTonalIconButton(onClick = { openMetadataEditor(currentTrack) }) { LyraVectorIcon(LyraIconType.EDIT, tint = MaterialTheme.colorScheme.primary, size = 18.dp) }
                         }
@@ -2611,5 +2618,18 @@ private fun LyraApp() {
             dismissButton = { TextButton(onClick = { showSleepDialog = false }) { Text("Tutup") } }
         )
     }
+    // --- Letakkan di sini (di luar Composable manapun, misalnya di bagian bawah MainActivity.kt) ---
+private fun toggleFloatingLyric(context: Context) {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(context)) {
+        val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${context.packageName}"))
+        context.startActivity(intent)
+    } else {
+        if (com.example.lyraplayer.playback.FloatingLyricService.isRunning) {
+            context.stopService(Intent(context, com.example.lyraplayer.playback.FloatingLyricService::class.java))
+        } else {
+            context.startService(Intent(context, com.example.lyraplayer.playback.FloatingLyricService::class.java))
+        }
+    }
+}
 }
 // === END OF MAINACTIVITY ===
