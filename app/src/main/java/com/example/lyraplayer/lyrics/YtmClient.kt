@@ -13,6 +13,7 @@ import java.io.File
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
+import java.net.URLEncoder
 
 data class YtmTrackItem(
     val videoId: String,
@@ -32,6 +33,7 @@ data class YtmHomeSection(
 object YtmClient {
     private const val YTM_BASE = "https://music.youtube.com/youtubei/v1"
     private const val FILTER_SONGS = "EgWKAQIIAWoMEA4QChADEAQQCRAF"
+    private const val UA_CHROME = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 
     private fun postJson(urlStr: String, bodyObj: JSONObject, headers: Map<String, String>): JSONObject {
         val conn = (URL(urlStr).openConnection() as HttpURLConnection).apply {
@@ -54,6 +56,27 @@ object YtmClient {
         }
     }
 
+    private fun httpGetJson(urlStr: String, headers: Map<String, String> = emptyMap()): JSONObject? {
+        val conn = (URL(urlStr).openConnection() as HttpURLConnection).apply {
+            requestMethod = "GET"
+            connectTimeout = 10_000
+            readTimeout = 12_000
+            instanceFollowRedirects = true
+            setRequestProperty("User-Agent", UA_CHROME)
+            for ((k, v) in headers) setRequestProperty(k, v)
+        }
+        return try {
+            val code = conn.responseCode
+            val stream = if (code in 200..299) conn.inputStream else conn.errorStream
+            val resp = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
+            if (code in 200..299 && resp.isNotBlank()) JSONObject(resp) else null
+        } catch (_: Exception) {
+            null
+        } finally {
+            conn.disconnect()
+        }
+    }
+
     private fun postWebRemix(endpoint: String, payload: JSONObject): JSONObject {
         val ctx = JSONObject().put(
             "client", JSONObject()
@@ -66,7 +89,7 @@ object YtmClient {
         val headers = mapOf(
             "Origin" to "https://music.youtube.com",
             "Referer" to "https://music.youtube.com/",
-            "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+            "User-Agent" to UA_CHROME
         )
         return postJson("$YTM_BASE/$endpoint?prettyPrint=false", payload, headers)
     }
@@ -145,72 +168,64 @@ object YtmClient {
         return out.distinctBy { it.videoId }
     }
 
-    // Mengambil tautan audio streaming langsung secara mandiri di Android menggunakan Piped/Invidious API publik
+    // =========================================================================
+    // MESIN STREAMING & DOWNLOAD MULTI-LAPIS (PASTI TEMBUS)
+    // =========================================================================
     fun resolveStreamUrl(videoId: String): String? {
-        val instances = listOf(
-            "https://pipedapi.kavin.rocks",
-            "https://pipedapi.adminforge.de",
-            "https://invidious.privacyredirect.com",
-            "https://vid.puffyan.us"
-        )
+        if (videoId.isBlank() || videoId.startsWith("browse_")) return null
+        val ytUrl = "https://www.youtube.com/watch?v=$videoId"
+        val encodedYtUrl = URLEncoder.encode(ytUrl, "UTF-8")
 
-        for (domain in instances) {
-            runCatching {
-                val apiUrl = if (domain.contains("piped")) {
-                    "$domain/streams/$videoId"
-                } else {
-                    "$domain/api/v1/videos/$videoId"
-                }
+        // JALUR 1: Panggil BetaBotz LANGSUNG dari HP (Menggunakan IP HP kamu sendiri, bukan IP Vercel!)
+        runCatching {
+            val betaUrl = "https://api.betabotz.eu.org/api/download/ytmp3?apikey=RFSTOREPBG&url=$encodedYtUrl"
+            val json = httpGetJson(betaUrl)
+            val mp3 = json?.optJSONObject("result")?.optString("mp3").orEmpty()
+            if (mp3.startsWith("http")) return mp3
+        }
 
-                val conn = (URL(apiUrl).openConnection() as HttpURLConnection).apply {
-                    requestMethod = "GET"
-                    connectTimeout = 6000
-                    readTimeout = 6000
-                    setRequestProperty("User-Agent", "Mozilla/5.0")
-                }
+        // JALUR 2: Mesin LOADER.TO / SAVENOW.TO (Persis dari server.js baris 376-420 milikmu!)
+        runCatching {
+            val startUrl = "https://loader.to/ajax/download.php?format=mp3&url=$encodedYtUrl"
+            val startJson = httpGetJson(startUrl, mapOf("Referer" to "https://loader.to/"))
+            if (startJson != null && startJson.optBoolean("success")) {
+                val jobId = startJson.optString("id")
+                val progressUrl = startJson.optString("progress_url")
+                    .ifBlank { "https://p.savenow.to/api/progress?id=$jobId" }
 
-                if (conn.responseCode in 200..299) {
-                    val respStr = conn.inputStream.bufferedReader().use { it.readText() }
-                    val json = JSONObject(respStr)
-
-                    if (domain.contains("piped")) {
-                        val audioStreams = json.optJSONArray("audioStreams")
-                        if (audioStreams != null && audioStreams.length() > 0) {
-                            var bestUrl = ""
-                            var maxBit = 0
-                            for (i in 0 until audioStreams.length()) {
-                                val s = audioStreams.optJSONObject(i) ?: continue
-                                val url = s.optString("url")
-                                val bit = s.optInt("bitrate", 0)
-                                if (url.isNotBlank() && bit >= maxBit) {
-                                    maxBit = bit
-                                    bestUrl = url
-                                }
-                            }
-                            if (bestUrl.isNotBlank()) return bestUrl
-                        }
-                    } else {
-                        // Format Invidious
-                        val adaptive = json.optJSONArray("adaptiveFormats")
-                        if (adaptive != null && adaptive.length() > 0) {
-                            var bestUrl = ""
-                            var maxBit = 0
-                            for (i in 0 until adaptive.length()) {
-                                val s = adaptive.optJSONObject(i) ?: continue
-                                val type = s.optString("type")
-                                val url = s.optString("url")
-                                val bit = s.optInt("bitrate", 0)
-                                if (type.contains("audio") && url.isNotBlank() && bit >= maxBit) {
-                                    maxBit = bit
-                                    bestUrl = url
-                                }
-                            }
-                            if (bestUrl.isNotBlank()) return bestUrl
-                        }
+                // Polling sampai konversi MP3 selesai (maksimal ~15 detik)
+                for (attempt in 1..12) {
+                    val progJson = httpGetJson(progressUrl, mapOf("Referer" to "https://loader.to/"))
+                    val dlUrl = progJson?.optString("download_url").orEmpty()
+                    if (dlUrl.startsWith("http")) {
+                        return dlUrl
                     }
+                    Thread.sleep(1300)
                 }
             }
         }
+
+        // JALUR 3: API Vreden / Ryzendesu / Siputzx (API Publik Indonesia Tanpa Whitelist IP)
+        val publicApis = listOf(
+            "https://api.siputzx.my.id/api/d/ytmp3?url=$encodedYtUrl",
+            "https://api.ryzendesu.vip/api/downloader/ytmp3?url=$encodedYtUrl",
+            "https://api.vreden.my.id/api/ytmp3?url=$encodedYtUrl"
+        )
+        for (api in publicApis) {
+            runCatching {
+                val j = httpGetJson(api) ?: return@runCatching
+                // Cek berbagai kemungkinan letak URL mp3 di JSON response
+                val dataObj = j.optJSONObject("data") ?: j.optJSONObject("result")
+                val link = dataObj?.optString("dl")
+                    ?.ifBlank { dataObj.optString("url") }
+                    ?.ifBlank { dataObj.optString("mp3") }
+                    ?.ifBlank { dataObj.optString("downloadUrl") }
+                    ?.ifBlank { dataObj.optJSONObject("download")?.optString("url").orEmpty() }
+                    ?: j.optString("url")
+                if (!link.isNullOrBlank() && link.startsWith("http")) return link
+            }
+        }
+
         return null
     }
 
@@ -218,16 +233,25 @@ object YtmClient {
         return runCatching {
             val streamUrl = resolveStreamUrl(track.videoId) ?: return false
             val url = URL(streamUrl)
-            val connection = url.openConnection() as HttpURLConnection
+            val connection = (url.openConnection() as HttpURLConnection).apply {
+                requestMethod = "GET"
+                instanceFollowRedirects = true
+                connectTimeout = 15_000
+                readTimeout = 30_000
+                setRequestProperty("User-Agent", UA_CHROME)
+            }
             connection.connect()
 
-            val cleanTitle = track.title.replace(Regex("[^a-zA-Z0-9_-]"), "_").take(40)
-            val fileName = "YT_Music_${cleanTitle}_${track.videoId}.m4a"
+            val cleanTitle = track.title.replace(Regex("[^a-zA-Z0-9 _-]"), "").trim().take(45).ifBlank { track.videoId }
+            val fileName = "$cleanTitle - ${track.artist.replace(Regex("[^a-zA-Z0-9 _-]"), "").take(25)}.mp3"
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 val values = ContentValues().apply {
                     put(MediaStore.Audio.Media.DISPLAY_NAME, fileName)
-                    put(MediaStore.Audio.Media.MIME_TYPE, "audio/mp4")
+                    put(MediaStore.Audio.Media.TITLE, track.title)
+                    put(MediaStore.Audio.Media.ARTIST, track.artist)
+                    put(MediaStore.Audio.Media.ALBUM, track.album)
+                    put(MediaStore.Audio.Media.MIME_TYPE, "audio/mpeg")
                     put(MediaStore.Audio.Media.RELATIVE_PATH, Environment.DIRECTORY_MUSIC + "/LyraDownloads")
                 }
                 val resolver = context.contentResolver
