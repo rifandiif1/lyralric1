@@ -1159,10 +1159,10 @@ private fun LyraApp() {
     var lyricsSubTab by remember { mutableStateOf(LyricsSubTab.PREVIEW) }
     var isSearchingLyrics by remember { mutableStateOf(false) }
 
-    var minDurationSec by remember { mutableIntStateOf(prefs.getInt("min_duration_sec", 30)) }
+    var minDurationSec by remember { mutableIntStateOf(prefs.getInt("min_duration_sec", 60)) }
     var sortOption by remember { mutableStateOf(runCatching { SortOption.valueOf(prefs.getString("sort_option", SortOption.DATE_ADDED_DESC.name).orEmpty()) }.getOrDefault(SortOption.DATE_ADDED_DESC)) }
     var visualizerStyle by remember { mutableStateOf(runCatching { VisualizerStyle.valueOf(prefs.getString("visualizer_style", VisualizerStyle.NEON_BARS.name).orEmpty()) }.getOrDefault(VisualizerStyle.NEON_BARS)) }
-    var themePreset by remember { mutableStateOf(runCatching { ThemeAccent.valueOf(prefs.getString("theme_preset", ThemeAccent.DYNAMIC.name).orEmpty()) }.getOrDefault(ThemeAccent.DYNAMIC)) }
+    var themePreset by remember { mutableStateOf(runCatching { ThemeAccent.valueOf(prefs.getString("theme_preset", ThemeAccent.LYRA_NEON.name).orEmpty()) }.getOrDefault(ThemeAccent.LYRA_NEON)) }
     var vinylMode by remember { mutableStateOf(prefs.getBoolean("vinyl_mode", true)) }
     var smoothFadePause by remember { mutableStateOf(prefs.getBoolean("smooth_fade", true)) }
     var autoWordKaraoke by remember { mutableStateOf(prefs.getBoolean("auto_word_karaoke", true)) }
