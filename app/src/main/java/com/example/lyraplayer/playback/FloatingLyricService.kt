@@ -2,16 +2,17 @@ package com.example.lyraplayer.playback
 
 import android.app.Service
 import android.content.Intent
+import android.graphics.Color
 import android.graphics.PixelFormat
+import android.graphics.Typeface
 import android.os.Build
 import android.os.IBinder
 import android.view.Gravity
-import android.view.LayoutInflater
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
+import android.widget.LinearLayout
 import android.widget.TextView
-import com.example.lyraplayer.R
 
 class FloatingLyricService : Service() {
     private var windowManager: WindowManager? = null
@@ -19,7 +20,7 @@ class FloatingLyricService : Service() {
     private var params: WindowManager.LayoutParams? = null
 
     companion object {
-        var currentLyricText: String = "Lyra Karaoke"
+        var currentLyricText: String = "♪ Lyra Karaoke"
             set(value) {
                 field = value
                 instance?.updateLyric(value)
@@ -35,18 +36,24 @@ class FloatingLyricService : Service() {
         isRunning = true
 
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
-        
-        // Buat tampilan dari layout sederhana atau TextView programmatically
+
+        // Layout kontainer melayang dengan sudut melengkung ala Dynamic Island / Widget Modern
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(28, 14, 28, 14)
+            setBackgroundColor(Color.parseColor("#CC12170E")) // Hijau tua transparan khas Lyra
+        }
+
         val textView = TextView(this).apply {
             text = currentLyricText
-            setTextColor(android.graphics.Color.parseColor("#B8F36B")) // Warna neon khas Lyra
-            textSize = 14f
-            setTypeface(null, android.graphics.Typeface.BOLD)
-            setPadding(24, 12, 24, 12)
-            setBackgroundColor(android.graphics.Color.parseColor("#99000000")) // Hitam transparan
+            setTextColor(Color.parseColor("#B8F36B")) // Neon Lyra Green
+            textSize = 13.5f
+            setTypeface(null, Typeface.BOLD)
+            maxLines = 1
         }
-        
-        floatingView = textView
+
+        container.addView(textView)
+        floatingView = container
 
         val layoutFlag = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
@@ -62,12 +69,11 @@ class FloatingLyricService : Service() {
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
             PixelFormat.TRANSLUCENT
         ).apply {
-            gravity = Gravity.TOP or Gravity.START
-            x = 100
-            y = 200
+            gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+            y = 120
         }
 
-        // Fitur Geser (Drag) Floating Window dengan sentuhan jari
+        // Fitur geser posisi widget dengan sentuhan jari
         var initialX = 0
         var initialY = 0
         var initialTouchX = 0f
@@ -92,13 +98,12 @@ class FloatingLyricService : Service() {
             }
         }
 
-        try {
-            windowManager?.addView(floatingView, params)
-        } catch (_: Exception) {}
+        runCatching { windowManager?.addView(floatingView, params) }
     }
 
     private fun updateLyric(text: String) {
-        (floatingView as? TextView)?.text = text.ifBlank { "â™ª..." }
+        val tv = (floatingView as? LinearLayout)?.getChildAt(0) as? TextView
+        tv?.text = text.ifBlank { "♪ ..." }
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
