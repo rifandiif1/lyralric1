@@ -146,21 +146,34 @@ object YtmClient {
     }
 
     // Fungsi pemecah URL stream yang dioptimalkan menggunakan client WEB & ANDROID_TESTSUITE
-   fun resolveStreamUrl(videoId: String): String? {
-        val payloads = listOf(
+  fun resolveStreamUrl(videoId: String): String? {
+        val clientConfigs = listOf(
+            // Klien Android Client (Biasanya paling stabil dan jarang ditolak)
             Triple(
-                "WEB",
-                "2.20240501.01.00",
-                JSONObject().put("clientName", "WEB").put("clientVersion", "2.20240501.01.00").put("hl", "id").put("gl", "ID")
+                "ANDROID",
+                "19.09.37",
+                JSONObject()
+                    .put("clientName", "ANDROID")
+                    .put("clientVersion", "19.09.37")
+                    .put("androidSdkVersion", 31)
+                    .put("osName", "Android")
+                    .put("osVersion", "12")
+                    .put("hl", "id")
+                    .put("gl", "ID")
             ),
+            // Klien TVEmbedded (Alternatif jika Android ditolak)
             Triple(
-                "ANDROID_TESTSUITE",
-                "1.9",
-                JSONObject().put("clientName", "ANDROID_TESTSUITE").put("clientVersion", "1.9").put("androidSdkVersion", 30).put("osName", "Android").put("osVersion", "11").put("hl", "id").put("gl", "ID")
+                "TVEMBEDDED",
+                "2.20220905.01.00",
+                JSONObject()
+                    .put("clientName", "TVEMBEDDED")
+                    .put("clientVersion", "2.20220905.01.00")
+                    .put("hl", "id")
+                    .put("gl", "ID")
             )
         )
 
-        for ((_, _, clientObj) in payloads) {
+        for ((cName, cVer, clientObj) in clientConfigs) {
             runCatching {
                 val body = JSONObject()
                     .put("videoId", videoId)
@@ -172,14 +185,13 @@ object YtmClient {
                     "https://www.youtube.com/youtubei/v1/player?prettyPrint=false",
                     body,
                     mapOf(
-                        "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-                        "Origin" to "https://www.youtube.com",
-                        "Referer" to "https://www.youtube.com/watch?v=$videoId"
+                        "User-Agent" to "com.google.android.youtube/$cVer (Linux; U; Android 12; id_ID) gzip",
+                        "X-Goog-Api-Format-Version" to "2"
                     )
                 )
 
-                val streamingData = json.optJSONObject("streamingData") ?: return@runCatching // <-- Tambahkan @runCatching
-                val adaptive = streamingData.optJSONArray("adaptiveFormats") ?: streamingData.optJSONArray("formats") ?: return@runCatching // <-- Tambahkan @runCatching
+                val streamingData = json.optJSONObject("streamingData") ?: return@runCatching
+                val adaptive = streamingData.optJSONArray("adaptiveFormats") ?: streamingData.optJSONArray("formats") ?: return@runCatching
                 
                 var bestUrl: String? = null
                 var highestBitrate = 0
