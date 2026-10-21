@@ -2704,8 +2704,33 @@ songs = found.values.distinctBy { if (it.filePath.isNotBlank()) it.filePath else
 
                     val mediaUri = target?.uri ?: currentUri
                     if (mediaUri != null && mediaUri.toString().startsWith("content://media/")) {
+                        scope.launch(Dispatchers.IO) {val mediaUri = target?.uri ?: currentUri
+                    if (mediaUri != null) {
                         scope.launch(Dispatchers.IO) {
                             runCatching {
+                                // 1. Tulis permanen langsung ke file fisik menggunakan jaudiotagger
+                                val filePath = target?.filePath.takeIf { !it.isNullOrBlank() } 
+                                    ?: run {
+                                        // Coba ambil path asli dari URI jika filePath kosong
+                                        val cursor = context.contentResolver.query(mediaUri, arrayOf(MediaStore.Audio.Media.DATA), null, null, null)
+                                        cursor?.use {
+                                            if (it.moveToFirst()) it.getString(0) else null
+                                        }
+                                    }
+
+                                if (!filePath.isNullOrBlank()) {
+                                    val file = File(filePath)
+                                    if (file.exists() && file.canWrite()) {
+                                        val audioFile = org.jaudiotagger.audio.AudioFileIO.read(file)
+                                        val tag = audioFile.tagOrCreateAndSetDefault
+                                        tag.setField(org.jaudiotagger.tag.FieldKey.TITLE, title)
+                                        tag.setField(org.jaudiotagger.tag.FieldKey.ARTIST, artist)
+                                        tag.setField(org.jaudiotagger.tag.FieldKey.ALBUM, album)
+                                        org.jaudiotagger.audio.AudioFileIO.write(audioFile)
+                                    }
+                                }
+
+                                // 2. Perbarui database MediaStore Android
                                 val values = ContentValues().apply {
                                     put(MediaStore.Audio.Media.TITLE, title)
                                     put(MediaStore.Audio.Media.ARTIST, artist)
@@ -2713,6 +2738,8 @@ songs = found.values.distinctBy { if (it.filePath.isNotBlank()) it.filePath else
                                 }
                                 context.contentResolver.update(mediaUri, values, null, null)
                             }
+                        }
+                    }
                         }
                     }
 
