@@ -16,6 +16,11 @@ data class YtmTrackItem(
     val thumbnailUrl: String = ""
 )
 
+data class YtmHomeSection(
+    val title: String,
+    val items: List<YtmTrackItem>
+)
+
 object YtmClient {
     private const val YTM_BASE = "https://music.youtube.com/youtubei/v1"
     private const val FILTER_SONGS = "EgWKAQIIAWoMEA4QChADEAQQCRAF"
@@ -58,7 +63,6 @@ object YtmClient {
         return postJson("$YTM_BASE/$endpoint?prettyPrint=false", payload, headers)
     }
 
-    // 1. Cari Lagu di YouTube Music
     fun searchSongs(query: String): List<YtmTrackItem> {
         if (query.isBlank()) return emptyList()
         val body = JSONObject().put("query", query.trim()).put("params", FILTER_SONGS)
@@ -74,7 +78,46 @@ object YtmClient {
         return out.distinctBy { it.videoId }
     }
 
-    // 2. Ambil Lagu Rekomendasi / Radio Queue dari 1 Video ID (atau Home Default)
+    fun fetchHomeSections(): List<YtmHomeSection> {
+        val body = JSONObject().put("browseId", "FEmusic_home")
+        val root = postWebRemix("browse", body)
+        val sections = mutableListOf<YtmHomeSection>()
+
+        val sectionList = findFirst(root, "sectionListRenderer")
+        val contents = sectionList?.optJSONArray("contents") ?: return emptyList()
+
+        for (i in 0 until contents.length()) {
+            val sec = contents.optJSONObject(i) ?: continue
+            val carousel = sec.optJSONObject("musicCarouselShelfRenderer")
+            if (carousel != null) {
+                val headerTitle = extractText(findFirst(carousel.optJSONObject("header"), "title"))
+                val carContents = carousel.optJSONArray("contents") ?: continue
+                val tracks = mutableListOf<YtmTrackItem>()
+                for (j in 0 until carContents.length()) {
+                    val c = carContents.optJSONObject(j) ?: continue
+                    val rItem = c.optJSONObject("musicResponsiveListItemRenderer")
+                    val twoRow = c.optJSONObject("musicTwoRowItemRenderer")
+
+                    if (rItem != null) {
+                        parseListItem(rItem)?.let { tracks.add(it) }
+                    } else if (twoRow != null) {
+                        val title = extractText(twoRow.optJSONObject("title"))
+                        val subtitle = extractText(twoRow.optJSONObject("subtitle"))
+                        val thumb = extractBestThumbnail(twoRow.optJSONObject("thumbnailRenderer"))
+                        val vid = findFirst(twoRow.optJSONObject("navigationEndpoint"), "watchEndpoint")?.optString("videoId").orEmpty()
+                        if (title.isNotBlank()) {
+                            tracks.add(YtmTrackItem(vid.ifBlank { "browse_${title.hashCode()}" }, title, subtitle, "YouTube Music", 0L, "", thumb))
+                        }
+                    }
+                }
+                if (tracks.isNotEmpty() && headerTitle.isNotBlank()) {
+                    sections.add(YtmHomeSection(headerTitle, tracks))
+                }
+            }
+        }
+        return sections
+    }
+
     fun fetchRadioTracks(seedVideoId: String = "dQw4w9WgXcQ"): List<YtmTrackItem> {
         val body = JSONObject()
             .put("videoId", seedVideoId)
@@ -94,9 +137,7 @@ object YtmClient {
         return out.distinctBy { it.videoId }
     }
 
-    // 3. Ambil Direct Stream Audio URL untuk ExoPlayer (Tanpa WebView)
     fun resolveStreamUrl(videoId: String): String? {
-        // Coba klien ANDROID_VR terlebih dahulu, lalu fallback ke IOS jika gagal
         val clients = listOf(
             Triple(
                 "ANDROID_VR",
@@ -142,7 +183,6 @@ object YtmClient {
                     val url = fmt.optString("url")
                     if (mime.startsWith("audio/") && url.isNotBlank()) {
                         val br = fmt.optInt("bitrate", 0)
-                        // Prioritaskan mp4a (m4a) agar langsung cocok dengan semua codec Android
                         val score = if (mime.contains("mp4a")) br + 50_000 else br
                         if (score > bestBitrate) {
                             bestBitrate = score
@@ -242,53 +282,5 @@ object YtmClient {
         return if (bestUrl.contains("googleusercontent.com")) {
             bestUrl.replace(Regex("=w\\d+-h\\d+.*$"), "=w544-h544-l90-rj")
         } else bestUrl
-    }
-    // Tambahkan data class ini di YtmClient.kt (di luar object YtmClient)
-data class YtmHomeSection(
-    val title: String,
-    val items: List<YtmTrackItem>
-)
-
-// Tambahkan fungsi ini di dalam object YtmClient
-    fun fetchHomeSections(): List<YtmHomeSection> {
-        val body = JSONObject().put("browseId", "FEmusic_home")
-        val root = postWebRemix("browse", body)
-        val sections = mutableListOf<YtmHomeSection>()
-
-        val sectionList = findFirst(root, "sectionListRenderer")
-        val contents = sectionList?.optJSONArray("contents") ?: return emptyList()
-
-        for (i in 0 until contents.length()) {
-            val sec = contents.optJSONObject(i) ?: continue
-            val carousel = sec.optJSONObject("musicCarouselShelfRenderer")
-            if (carousel != null) {
-                val headerTitle = extractText(findFirst(carousel.optJSONObject("header"), "title"))
-                val carContents = carousel.optJSONArray("contents") ?: continue
-                val tracks = mutableListOf<YtmTrackItem>()
-                for (j in 0 until carContents.length()) {
-                    val c = carContents.optJSONObject(j) ?: continue
-                    
-                    // Ekstraksi item musik (bisa berupa responsive list atau two row card)
-                    val rItem = c.optJSONObject("musicResponsiveListItemRenderer")
-                    val twoRow = c.optJSONObject("musicTwoRowItemRenderer")
-
-                    if (rItem != null) {
-                        parseListItem(rItem)?.let { tracks.add(it) }
-                    } else if (twoRow != null) {
-                        val title = extractText(twoRow.optJSONObject("title"))
-                        val subtitle = extractText(twoRow.optJSONObject("subtitle"))
-                        val thumb = extractBestThumbnail(twoRow.optJSONObject("thumbnailRenderer"))
-                        val vid = findFirst(twoRow.optJSONObject("navigationEndpoint"), "watchEndpoint")?.optString("videoId").orEmpty()
-                        if (title.isNotBlank()) {
-                            tracks.add(YtmTrackItem(vid.ifBlank { "browse_${title.hashCode()}" }, title, subtitle, "YouTube Music", 0L, "", thumb))
-                        }
-                    }
-                }
-                if (tracks.isNotEmpty() && headerTitle.isNotBlank()) {
-                    sections.add(YtmHomeSection(headerTitle, tracks))
-                }
-            }
-        }
-        return sections
     }
 }
