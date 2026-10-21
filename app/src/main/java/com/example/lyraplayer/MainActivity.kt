@@ -2477,7 +2477,7 @@ songs = found.values.distinctBy { if (it.filePath.isNotBlank()) it.filePath else
         )
     }
 
-    if (showMetadataDialog) {
+   if (showMetadataDialog) {
         val target = editingTrackTarget ?: currentTrack
         AlertDialog(
             onDismissRequest = { showMetadataDialog = false },
@@ -2515,6 +2515,37 @@ songs = found.values.distinctBy { if (it.filePath.isNotBlank()) it.filePath else
                     metadataOverrides = updatedMap
                     saveMetadataOverrides(prefs, updatedMap)
 
+                    // >>> TARUH KODE PENYIMPANAN PERMANEN KE FILE FISIK DI SINI <<<
+                    scope.launch(Dispatchers.IO) {
+                        runCatching {
+                            val mediaUri = target?.uri ?: currentUri
+                            if (mediaUri != null) {
+                                // 1. Perbarui database MediaStore Android
+                                val values = ContentValues().apply {
+                                    put(MediaStore.Audio.Media.TITLE, title)
+                                    put(MediaStore.Audio.Media.ARTIST, artist)
+                                    put(MediaStore.Audio.Media.ALBUM, album)
+                                }
+                                context.contentResolver.update(mediaUri, values, null, null)
+
+                                // 2. Tulis permanen langsung ke file fisik audio menggunakan jaudiotagger
+                                val filePath = target?.filePath
+                                if (!filePath.isNullOrBlank()) {
+                                    val file = File(filePath)
+                                    if (file.exists() && file.canWrite()) {
+                                        val audioFile = org.jaudiotagger.audio.AudioFileIO.read(file)
+                                        val tag = audioFile.tagOrCreateAndSetDefault
+                                        tag.setField(org.jaudiotagger.tag.FieldKey.TITLE, title)
+                                        tag.setField(org.jaudiotagger.tag.FieldKey.ARTIST, artist)
+                                        tag.setField(org.jaudiotagger.tag.FieldKey.ALBUM, album)
+                                        org.jaudiotagger.audio.AudioFileIO.write(audioFile)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    // =============================================================
+
                     val mediaUri = target?.uri ?: currentUri
                     if (mediaUri != null && mediaUri.toString().startsWith("content://media/")) {
                         scope.launch(Dispatchers.IO) {
@@ -2549,6 +2580,7 @@ songs = found.values.distinctBy { if (it.filePath.isNotBlank()) it.filePath else
                     showMetadataDialog = false
                 }) { Text("Simpan Permanen") }
             },
+            // ... (sisa dismissButton biarkan tetap sama)
             dismissButton = {
                 Row {
                     if (target != null) {
