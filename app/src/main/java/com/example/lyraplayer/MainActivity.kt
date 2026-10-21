@@ -1957,6 +1957,76 @@ private fun LyraApp() {
                                 }
                                 TrackList(listToShow, currentUri, playing, favoriteIds, ::playTracks, ::toggleFavorite, { trackToAdd = it }, { openMetadataEditor(it) }, true, Modifier.weight(1f))
                             }
+                            LibrarySubTab.YT_MUSIC -> {
+                                Spacer(Modifier.height(8.dp))
+                                ElevatedCard(shape = RoundedCornerShape(20.dp), modifier = Modifier.fillMaxWidth()) {
+                                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        Text(ytmStatus, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                                            OutlinedTextField(
+                                                value = ytmQuery,
+                                                onValueChange = { ytmQuery = it },
+                                                label = { Text("Cari lagu / penyanyi di YT Music...") },
+                                                singleLine = true,
+                                                shape = RoundedCornerShape(16.dp),
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                            Button(
+                                                onClick = { triggerYtmSearch(ytmQuery) },
+                                                enabled = ytmQuery.isNotBlank() && !isSearchingYtm,
+                                                shape = RoundedCornerShape(14.dp)
+                                            ) {
+                                                Text(if (isSearchingYtm) "..." else "Cari")
+                                            }
+                                        }
+                                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+                                            listOf("Chart Indonesia", "Dewa 19", "Pop Punk Indonesia", "Lagu Hits Terbaru", "Acoustic Chill").forEach { preset ->
+                                                AssistChip(
+                                                    onClick = { ytmQuery = preset; triggerYtmSearch(preset) },
+                                                    label = { Text(preset, fontSize = 11.sp) }
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                                if (isSearchingYtm) {
+                                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp), color = MaterialTheme.colorScheme.primary)
+                                } else {
+                                    Spacer(Modifier.height(8.dp))
+                                }
+                                val ytmAudioTracks = remember(ytmResults) { ytmResults.map { ytmItemToAudioTrack(it) } }
+                                if (ytmAudioTracks.isEmpty() && !isSearchingYtm) {
+                                    Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
+                                        EmptyState("Streaming YouTube Music", "Ketik judul lagu atau pilih kategori di atas untuk memutar lagu online lengkap dengan lirik karaoke otomatis.")
+                                    }
+                                } else {
+                                    Row(Modifier.fillMaxWidth().padding(bottom = 4.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                        Text("${ytmAudioTracks.size} lagu online", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary)
+                                        TextButton(
+                                            onClick = {
+                                                val first = ytmResults.firstOrNull()
+                                                if (first != null) loadYtmRadio(first.videoId, first.title)
+                                            },
+                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                                        ) { Text("↻ Muat Radio Serupa") }
+                                    }
+                                    TrackList(
+                                        tracks = ytmAudioTracks,
+                                        currentUri = currentUri,
+                                        playing = playing,
+                                        favoriteIds = favoriteIds,
+                                        playTracks = { list, idx ->
+                                            playTracks(list, idx)
+                                            status = "Streaming YT Music: ${list[idx].title}"
+                                        },
+                                        toggleFavorite = ::toggleFavorite,
+                                        onAddToPlaylist = { trackToAdd = it },
+                                        onEditTrack = { openMetadataEditor(it) },
+                                        showFolder = false,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
+                            }
                             LibrarySubTab.FOLDERS -> {
                                 Spacer(Modifier.height(8.dp))
                                 val activeFolder = selectedBrowseFolder
