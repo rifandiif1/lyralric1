@@ -77,7 +77,42 @@ object YtmClient {
         }
         return out.distinctBy { it.videoId }
     }
+// Fungsi untuk Mengunduh Lagu YouTube Music ke Folder Musik HP
+    fun downloadSongToDevice(context: Context, track: YtmTrackItem): Boolean {
+        return runCatching {
+            val streamUrl = resolveStreamUrl(track.videoId) ?: return false
+            val url = URL(streamUrl)
+            val connection = url.openConnection() as HttpURLConnection
+            connection.connect()
 
+            val cleanTitle = track.title.replace(Regex("[^a-zA-Z0-9_-]"), "_").take(40)
+            val fileName = "YT_Music_${cleanTitle}_${track.videoId}.m4a"
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val values = ContentValues().apply {
+                    put(MediaStore.Audio.Media.DISPLAY_NAME, fileName)
+                    put(MediaStore.Audio.Media.MIME_TYPE, "audio/mp4")
+                    put(MediaStore.Audio.Media.RELATIVE_PATH, Environment.DIRECTORY_MUSIC + "/LyraDownloads")
+                }
+                val resolver = context.contentResolver
+                val uri = resolver.insert(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, values) ?: return false
+                resolver.openOutputStream(uri)?.use { output ->
+                    connection.inputStream.use { input -> input.copyTo(output) }
+                }
+            } else {
+                val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), "LyraDownloads")
+                if (!dir.exists()) dir.mkdirs()
+                val file = File(dir, fileName)
+                file.outputStream().use { output ->
+                    connection.inputStream.use { input -> input.copyTo(output) }
+                }
+                // Scan media agar masuk ke database galeri HP
+                val scanIntent = Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE, Uri.fromFile(file))
+                context.sendBroadcast(scanIntent)
+            }
+            true
+        }.getOrDefault(false)
+    }
     fun fetchHomeSections(): List<YtmHomeSection> {
         val body = JSONObject().put("browseId", "FEmusic_home")
         val root = postWebRemix("browse", body)
