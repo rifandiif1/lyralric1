@@ -1555,7 +1555,7 @@ songs = found.values.distinctBy { if (it.filePath.isNotBlank()) it.filePath else
 
  fun playTracks(list: List<AudioTrack>, index: Int) {
         val c = controller ?: run { 
-            status = "Error: Pemutar media belum siap."
+            status = "Pemutar sedang disiapkan."
             return 
         }
         if (list.isEmpty() || index !in list.indices) return
@@ -1567,37 +1567,26 @@ songs = found.values.distinctBy { if (it.filePath.isNotBlank()) it.filePath else
         val isYtm = uriStr.startsWith("ytm://") || s.id.startsWith("ytm:")
 
         if (isYtm) {
-            status = "Memuat audio dari YouTube Music..."
+            status = "Menghubungkan ke YouTube Music..."
             val videoId = when {
                 uriStr.startsWith("ytm://") -> s.uri.host?.takeIf { it.isNotBlank() } ?: s.uri.lastPathSegment.orEmpty()
                 else -> s.id.removePrefix("ytm:")
             }
 
             scope.launch(Dispatchers.IO) {
-                // Panggil pemecah URL stream
+                // Panggil pemecah URL stream dari YtmClient
                 val realStreamUrl = runCatching { YtmClient.resolveStreamUrl(videoId) }.getOrNull()
                 
                 withContext(Dispatchers.Main) {
                     if (realStreamUrl.isNullOrBlank()) {
-                        // INI AKAN MUNCUL DI LAYAR JIKA URL GAGAL DIDAPATKAN
-                        status = "Gagal: Server YouTube menolak tautan audio."
+                        status = "Gagal memutar: Server YouTube menolak tautan audio."
                         return@withContext
                     }
 
                     try {
-                        status = "Menyiapkan pemutar..."
+                        status = "Menyiapkan pemutar online..."
                         val onlineUri = Uri.parse(realStreamUrl)
                         
-                        // Buat DataSource.Factory dengan User-Agent agar lolos proteksi YouTube
-                        val httpDataSourceFactory = androidx.media3.datasource.DefaultHttpDataSource.Factory()
-                            .setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-                            .setAllowCrossProtocolRedirects(true)
-
-                        val mediaSourceFactory = androidx.media3.exoplayer.source.DefaultMediaSourceFactory(
-                            androidx.media3.datasource.DefaultDataSource.Factory(context, httpDataSourceFactory)
-                        )
-
-                        // Masukkan ke MediaItem
                         val mediaItem = MediaItem.Builder()
                             .setUri(onlineUri)
                             .setMediaId(s.id)
@@ -1618,7 +1607,7 @@ songs = found.values.distinctBy { if (it.filePath.isNotBlank()) it.filePath else
                         c.play()
                         status = "Memutar online: ${s.title}"
                     } catch (e: Exception) {
-                        status = "Error ExoPlayer: ${e.message}"
+                        status = "Error pemutaran: ${e.message}"
                     }
                 }
             }
@@ -1644,7 +1633,7 @@ songs = found.values.distinctBy { if (it.filePath.isNotBlank()) it.filePath else
             c.setMediaItems(items, index, 0L)
             c.prepare()
             c.play()
-            status = "Memutar lokal: ${s.title}"
+            status = "Memutar: ${s.title}"
         }
 
         currentTitle = s.title
