@@ -1,16 +1,25 @@
 package com.example.lyraplayer.playback
 
 import android.content.Intent
+import android.net.Uri
 import android.os.Handler
 import android.os.Looper
+import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.Player
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DefaultDataSource
+import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.datasource.ResolvingDataSource
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import com.example.lyraplayer.lyrics.LrcParser
+import com.example.lyraplayer.lyrics.YtmClient
 import com.example.lyraplayer.widget.LyricsWidgetProvider
+import java.io.IOException
 
 class PlaybackService : MediaSessionService() {
     private var mediaSession: MediaSession? = null
@@ -47,10 +56,30 @@ class PlaybackService : MediaSessionService() {
         }
     }
 
+    @OptIn(UnstableApi::class)
     override fun onCreate() {
         super.onCreate()
         val prefs = getSharedPreferences("lyra", MODE_PRIVATE)
+
+        // Konfigurasi Hybrid DataSource: Mendukung File Lokal + Streaming YouTube Music (ytm://)
+        val httpFactory = DefaultHttpDataSource.Factory()
+            .setUserAgent("com.google.android.apps.youtube.vr.oculus/1.56.21 (Linux; U; Android 12; en_US; Quest 3; Build/SQ3A.220605.009.A1; Cronet/107.0.5284.2)")
+            .setAllowCrossProtocolRedirects(true)
+        val baseFactory = DefaultDataSource.Factory(this, httpFactory)
+        val resolvingFactory = ResolvingDataSource.Factory(baseFactory) { dataSpec ->
+            val uri = dataSpec.uri
+            if (uri.scheme == "ytm") {
+                val videoId = uri.host?.takeIf { it.isNotBlank() } ?: uri.lastPathSegment.orEmpty()
+                val streamUrl = YtmClient.resolveStreamUrl(videoId)
+                    ?: throw IOException("Gagal memuat stream YouTube Music untuk ID: $videoId")
+                dataSpec.withUri(Uri.parse(streamUrl))
+            } else {
+                dataSpec
+            }
+        }
+
         val player = ExoPlayer.Builder(this)
+            .setMediaSourceFactory(DefaultMediaSourceFactory(resolvingFactory))
             .setAudioAttributes(
                 AudioAttributes.Builder()
                     .setUsage(C.USAGE_MEDIA)
